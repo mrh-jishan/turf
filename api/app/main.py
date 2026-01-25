@@ -12,6 +12,7 @@ from .config import settings
 from .database import Base, engine, get_session
 from .models import Build, Claim, User
 from .schemas import BuildCreate, BuildOut, ClaimCreate, ClaimOut, NearbyQuery, UserCreate, UserOut
+from .routes import router as api_router
 
 app = FastAPI(title=settings.app_name, version="0.1.0", openapi_url="/openapi.json")
 
@@ -30,6 +31,7 @@ async def startup_event():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+app.include_router(api_router)
 
 @app.get("/health")
 async def health():

@@ -1,7 +1,7 @@
 import Head from 'next/head';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import Map, { ClaimFeature } from '../components/Map';
-import { createBuild, createClaim, fetchNearby } from '../lib/api';
+import { createBuild, createClaim, fetchNearby, login, me, register } from '../lib/api';
 import { flags, prefabs } from '../lib/prefabs';
 
 const usaCenter: [number, number] = [-98.5795, 39.8283];
@@ -41,6 +41,14 @@ export default function Home() {
   const [owner, setOwner] = useState('demo-user');
   const [address, setAddress] = useState('123 Demo St');
   const center = useMemo(() => [lon, lat] as [number, number], [lat, lon]);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
+  const [authHandle, setAuthHandle] = useState('demo');
+  const [authEmail, setAuthEmail] = useState('demo@example.com');
+  const [authPassword, setAuthPassword] = useState('password123');
+  const [token, setToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [chatLog, setChatLog] = useState<string[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +65,27 @@ export default function Home() {
       cancelled = true;
     };
   }, [lat, lon]);
+
+  useEffect(() => {
+    if (!token) return;
+    me(token)
+      .then(setCurrentUser)
+      .catch(() => setToken(null));
+  }, [token]);
+
+  useEffect(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    const ws = new WebSocket((process.env.NEXT_PUBLIC_WS_BASE || 'ws://localhost:8000') + '/ws/chat');
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setChatLog((log) => [...log.slice(-20), JSON.stringify(data)]);
+    };
+    wsRef.current = ws;
+    return () => ws.close();
+  }, []);
 
   const clampUSA = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -78,6 +107,24 @@ export default function Home() {
     } catch (err) {
       console.error(err);
       alert('Failed to claim/build. Check API is running.');
+    }
+  }
+
+  async function handleAuth() {
+    try {
+      if (authMode === 'register') {
+        await register(authHandle, authEmail, authPassword);
+      }
+      const t = await login(authEmail, authPassword);
+      setToken(t.access_token);
+    } catch (err) {
+      alert('Auth failed. Check API.');
+    }
+  }
+
+  function sendChat() {
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ from: currentUser?.handle || 'anon', msg: 'ping' }));
     }
   }
 
@@ -108,6 +155,54 @@ export default function Home() {
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Build Panel</h2>
               <span className="text-xs px-2 py-1 rounded-full bg-white/10 border border-white/15">Live 3D</span>
+            </div>
+
+            <div className="flex gap-2 text-sm">
+              <button
+                onClick={() => setAuthMode('register')}
+                className={`px-3 py-2 rounded-lg border ${authMode === 'register' ? 'border-neon' : 'border-white/20'}`}
+              >
+                Register
+              </button>
+              <button
+                onClick={() => setAuthMode('login')}
+                className={`px-3 py-2 rounded-lg border ${authMode === 'login' ? 'border-neon' : 'border-white/20'}`}
+              >
+                Login
+              </button>
+              <button onClick={handleAuth} className="flex-1 bg-neon/20 border border-neon rounded-lg">
+                {token ? 'Refresh session' : 'Submit'}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <label className="flex flex-col gap-1 col-span-1">
+                <span className="text-slate-400">Handle</span>
+                <input
+                  value={authHandle}
+                  onChange={(e) => setAuthHandle(e.target.value)}
+                  className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                />
+              </label>
+              <label className="flex flex-col gap-1 col-span-1">
+                <span className="text-slate-400">Email</span>
+                <input
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                />
+              </label>
+              <label className="flex flex-col gap-1 col-span-2">
+                <span className="text-slate-400">Password</span>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
+                />
+              </label>
+              {currentUser && (
+                <p className="col-span-2 text-xs text-neon">Logged in as {currentUser.handle}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -213,6 +308,20 @@ export default function Home() {
             <p className="text-xs text-slate-400">
               This hits the API if available; otherwise uses the demo data. USA-only bounds enforced on the client.
             </p>
+
+            <div className="border-t border-white/10 pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">Chat (echo demo)</h3>
+                <button onClick={sendChat} className="text-xs px-2 py-1 bg-white/10 rounded-lg border border-white/15">
+                  Ping
+                </button>
+              </div>
+              <div className="bg-black/30 border border-white/10 rounded-lg p-2 h-24 overflow-auto text-xs text-slate-200">
+                {chatLog.map((line, idx) => (
+                  <div key={idx}>{line}</div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
       </main>
