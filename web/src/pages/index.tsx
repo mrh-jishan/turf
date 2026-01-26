@@ -1,8 +1,10 @@
 import Head from 'next/head';
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Map, { ClaimFeature } from '../components/Map';
-import { createBuild, createClaim, fetchNearby, login, me, register } from '../lib/api';
+import ChatPanel from '../components/ChatPanel';
+import { createBuild, createClaim, fetchNearby, fetchFog, fetchVisibility, login, me, register } from '../lib/api';
 import { flags, prefabs } from '../lib/prefabs';
+import SiteLayout from '../components/SiteLayout';
 
 const usaCenter: [number, number] = [-98.5795, 39.8283];
 const usaBounds = {
@@ -47,8 +49,10 @@ export default function Home() {
   const [authPassword, setAuthPassword] = useState('password123');
   const [token, setToken] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [chatLog, setChatLog] = useState<string[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [roomId, setRoomId] = useState<string>('demo-room');
+  const wsBase = process.env.NEXT_PUBLIC_WS_BASE || 'ws://localhost:8000';
+  const [fogGeojson, setFogGeojson] = useState<any>(null);
+  const [visibleGeojson, setVisibleGeojson] = useState<any>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,18 +78,24 @@ export default function Home() {
   }, [token]);
 
   useEffect(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    const ws = new WebSocket((process.env.NEXT_PUBLIC_WS_BASE || 'ws://localhost:8000') + '/ws/chat');
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setChatLog((log) => [...log.slice(-20), JSON.stringify(data)]);
+    if (!token) return;
+    let cancelled = false;
+    fetchVisibility(token, lat, lon, 50)
+      .then((res) => {
+        if (cancelled) return;
+        setVisibleGeojson(res.visible_geojson);
+      })
+      .catch(() => {});
+    fetchFog(token, lat, lon, 50)
+      .then((res) => {
+        if (cancelled) return;
+        setFogGeojson(res.fog_geojson);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
     };
-    wsRef.current = ws;
-    return () => ws.close();
-  }, []);
+  }, [token, lat, lon]);
 
   const clampUSA = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -122,18 +132,12 @@ export default function Home() {
     }
   }
 
-  function sendChat() {
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ from: currentUser?.handle || 'anon', msg: 'ping' }));
-    }
-  }
-
   return (
-    <>
+    <SiteLayout>
       <Head>
         <title>Turf | Claim Your Block</title>
       </Head>
-      <main className="min-h-screen px-4 py-6 sm:px-8 bg-transparent text-white">
+      <main className="px-4 py-6 sm:px-0 bg-transparent text-white">
         <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">USA Only Beta</p>
@@ -149,7 +153,7 @@ export default function Home() {
         </header>
 
         <section className="mt-6 grid gap-6 lg:grid-cols-[1.65fr_1fr]">
-          <Map center={center} claims={claims} />
+          <Map center={center} claims={claims} fogGeojson={fogGeojson} visibleGeojson={visibleGeojson} />
 
           <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-5 shadow-glow flex flex-col gap-4">
             <div className="flex items-center justify-between">
@@ -309,22 +313,25 @@ export default function Home() {
               This hits the API if available; otherwise uses the demo data. USA-only bounds enforced on the client.
             </p>
 
-            <div className="border-t border-white/10 pt-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold">Chat (echo demo)</h3>
-                <button onClick={sendChat} className="text-xs px-2 py-1 bg-white/10 rounded-lg border border-white/15">
-                  Ping
-                </button>
+            <div className="grid md:grid-cols-2 gap-3">
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold">Room</h3>
+                  <button
+                    onClick={() => setRoomId(prompt('Room ID', roomId) || roomId)}
+                    className="text-xs px-2 py-1 border border-white/20 rounded-lg"
+                  >
+                    Change
+                  </button>
+                </div>
+                <p className="text-slate-400 text-xs">Uses secured WS: only members connected.</p>
+                <p className="text-slate-400 text-xs">Current: {roomId}</p>
               </div>
-              <div className="bg-black/30 border border-white/10 rounded-lg p-2 h-24 overflow-auto text-xs text-slate-200">
-                {chatLog.map((line, idx) => (
-                  <div key={idx}>{line}</div>
-                ))}
-              </div>
+              <ChatPanel roomId={roomId} token={token} wsBase={wsBase} />
             </div>
           </div>
         </section>
       </main>
-    </>
+    </SiteLayout>
   );
 }

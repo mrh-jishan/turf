@@ -42,6 +42,33 @@ export async function createBuild(payload: BuildPayload) {
   return res.json();
 }
 
+export async function fetchVisibility(token: string, lat: number, lon: number, radius_m = 50) {
+  const res = await fetch(`${API_BASE}/visibility?lat=${lat}&lon=${lon}&radius_m=${radius_m}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('visibility failed');
+  return res.json();
+}
+
+export async function fetchFog(token: string, lat: number, lon: number, radius_m = 50, bbox?: { min_lon: number; min_lat: number; max_lon: number; max_lat: number }) {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    radius_m: String(radius_m),
+  });
+  if (bbox) {
+    params.set('min_lon', String(bbox.min_lon));
+    params.set('min_lat', String(bbox.min_lat));
+    params.set('max_lon', String(bbox.max_lon));
+    params.set('max_lat', String(bbox.max_lat));
+  }
+  const res = await fetch(`${API_BASE}/fog?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('fog failed');
+  return res.json();
+}
+
 export async function register(handle: string, email: string, password: string) {
   const res = await fetch(`${API_BASE}/register`, {
     method: 'POST',

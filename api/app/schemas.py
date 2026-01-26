@@ -100,15 +100,19 @@ class ConnectionOut(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    recipient_id: str
-    body: str = Field(..., min_length=1, max_length=1000)
+    room_id: str
+    body: str = Field(..., min_length=1, max_length=2000)
+    attachment_url: Optional[str] = None
+    attachment_type: Optional[str] = None
 
 
 class MessageOut(BaseModel):
     id: str
     sender_id: str
-    recipient_id: str
+    room_id: str
     body: str
+    attachment_url: Optional[str]
+    attachment_type: Optional[str]
     created_at: str
 
     class Config:
@@ -121,7 +125,7 @@ class StoreItemOut(BaseModel):
     name: str
     kind: str
     price_cents: int
-    metadata: Optional[str]
+    meta: Optional[str]
     active: bool
 
     class Config:
@@ -136,3 +140,34 @@ class InventoryOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class ChatRoomCreate(BaseModel):
+    name: str
+    member_ids: List[str]
+    is_group: bool = True
+
+
+class ChatRoomOut(BaseModel):
+    id: str
+    name: str
+    is_group: bool
+
+    class Config:
+        orm_mode = True
+
+
+class VisibilityQuery(BaseModel):
+    lat: float
+    lon: float
+    radius_m: int = Field(50, ge=20, le=200)
+
+
+class VisibilityOut(BaseModel):
+    visible_geojson: str
+    source_count: int
+
+
+class FogOut(BaseModel):
+    fog_geojson: str
+    visible_sources: int

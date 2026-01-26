@@ -54,8 +54,10 @@ class Message(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
-    recipient_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    room_id = Column(UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="CASCADE"))
     body = Column(Text, nullable=False)
+    attachment_url = Column(Text, nullable=True)
+    attachment_type = Column(String(50), nullable=True)  # image, file, voice, etc.
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -67,7 +69,7 @@ class StoreItem(Base):
     name = Column(String(100), nullable=False)
     kind = Column(String(30), nullable=False)  # prefab, decal, flag
     price_cents = Column(Integer, nullable=False, default=0)
-    metadata = Column(Text, nullable=True)
+    meta = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
 
 
@@ -79,6 +81,48 @@ class Inventory(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
     item_id = Column(UUID(as_uuid=True), ForeignKey("store_items.id", ondelete="CASCADE"))
     acquired_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ChatRoom(Base):
+    __tablename__ = "chat_rooms"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(80), nullable=False)
+    is_group = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ChatMember(Base):
+    __tablename__ = "chat_members"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_member_room_user"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id = Column(UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="CASCADE"))
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    role = Column(String(20), default="member")  # member/admin
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SupplyPath(Base):
+    __tablename__ = "supply_paths"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    friend_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    geom = Column(Geography(geometry_type="LINESTRING", srid=4326), nullable=False)
+    health = Column(Integer, default=30, nullable=False)  # days remaining
+    last_touch = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("user_id", "friend_id", name="uq_supply_path_pair"),)
+
+
+class VisibleArea(Base):
+    __tablename__ = "visible_areas"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    geom = Column(Geography(geometry_type="MULTIPOLYGON", srid=4326), nullable=True)
+    refreshed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class Build(Base):
     __tablename__ = "builds"

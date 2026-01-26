@@ -19,6 +19,8 @@ export interface ClaimFeature {
 interface Props {
   center: [number, number];
   claims?: ClaimFeature[];
+  fogGeojson?: any;
+  visibleGeojson?: any;
 }
 
 function buildGeoJSON(claims: ClaimFeature[]) {
@@ -108,7 +110,7 @@ function makeThreeLayer(id: string, claims: ClaimFeature[]): mapboxgl.CustomLaye
   };
 }
 
-export default function Map({ center, claims = [] }: Props) {
+export default function Map({ center, claims = [], fogGeojson, visibleGeojson }: Props) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -151,6 +153,49 @@ export default function Map({ center, claims = [] }: Props) {
   useEffect(() => {
     if (!loaded || !mapRef.current) return;
     const map = mapRef.current;
+
+    // fog layer
+    const fogSource = 'fog';
+    const fogLayer = 'fog-layer';
+    if (map.getLayer(fogLayer)) map.removeLayer(fogLayer);
+    if (map.getSource(fogSource)) map.removeSource(fogSource);
+    if (fogGeojson) {
+      map.addSource(fogSource, {
+        type: 'geojson',
+        data: typeof fogGeojson === 'string' ? JSON.parse(fogGeojson) : fogGeojson,
+      });
+      map.addLayer({
+        id: fogLayer,
+        type: 'fill',
+        source: fogSource,
+        paint: {
+          'fill-color': '#000',
+          'fill-opacity': 0.82,
+        },
+      });
+    }
+
+    // visible glow
+    const visSource = 'visible';
+    const visLayer = 'visible-layer';
+    if (map.getLayer(visLayer)) map.removeLayer(visLayer);
+    if (map.getSource(visSource)) map.removeSource(visSource);
+    if (visibleGeojson) {
+      map.addSource(visSource, {
+        type: 'geojson',
+        data: typeof visibleGeojson === 'string' ? JSON.parse(visibleGeojson) : visibleGeojson,
+      });
+      map.addLayer({
+        id: visLayer,
+        type: 'fill',
+        source: visSource,
+        paint: {
+          'fill-color': '#5af5ff',
+          'fill-opacity': 0.12,
+          'fill-outline-color': '#5af5ff',
+        },
+      });
+    }
 
     const sourceId = 'claims';
     if (map.getLayer('claims-label')) map.removeLayer('claims-label');
