@@ -21,6 +21,7 @@ interface Props {
   claims?: ClaimFeature[];
   fogGeojson?: any;
   visibleGeojson?: any;
+  onLocationSelect?: (lat: number, lon: number) => void;
 }
 
 function buildGeoJSON(claims: ClaimFeature[]) {
@@ -110,10 +111,20 @@ function makeThreeLayer(id: string, claims: ClaimFeature[]): mapboxgl.CustomLaye
   };
 }
 
-export default function Map({ center, claims = [], fogGeojson, visibleGeojson }: Props) {
+export default function Map({ center, claims = [], fogGeojson, visibleGeojson, onLocationSelect }: Props) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [styleLoaded, setStyleLoaded] = useState(false);
+  const previousClaimsRef = useRef<ClaimFeature[]>([]);
+
+  const handleZoom = (direction: 'in' | 'out') => {
+    if (mapRef.current) {
+      const currentZoom = mapRef.current.getZoom();
+      const newZoom = direction === 'in' ? currentZoom + 1 : currentZoom - 1;
+      mapRef.current.easeTo({ zoom: newZoom, duration: 300 });
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current || !mapboxgl.accessToken) return;
@@ -126,9 +137,12 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson }:
       bearing: -10,
       hash: false,
       cooperativeGestures: true,
+      antialias: true,
+      preserveDrawingBuffer: true,
     });
     map.addControl(new mapboxgl.NavigationControl());
     map.addControl(new mapboxgl.FullscreenControl());
+    
     map.on('style.load', () => {
       map.setFog({
         range: [-0.5, 2],
@@ -138,126 +152,254 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson }:
         'horizon-blend': 0.2,
       });
       map.setLight({ intensity: 0.8 });
+      setStyleLoaded(true);
     });
+    
+    map.on('click', (e) => {
+      if (onLocationSelect) {
+        onLocationSelect(e.lngLat.lat, e.lngLat.lng);
+      }
+    });
+    
+    map.on('error', (e) => {
+      console.error('Mapbox error:', e.error);
+    });
+    
     map.on('load', () => setLoaded(true));
     mapRef.current = map;
-    return () => map.remove();
-  }, [center]);
+    return () => {
+      setStyleLoaded(false);
+      map.remove();
+    };
+  }, []);
 
   useEffect(() => {
-    if (loaded && mapRef.current) {
-      mapRef.current.easeTo({ center, duration: 800 });
+    if (loaded && styleLoaded && mapRef.current) {
+      try {
+        // Ensure the map has a valid canvas and is fully rendered
+        const map = mapRef.current;
+        if (!map.getCanvas() || !map.getCenter) {
+          console.warn('Map canvas not ready');
+          return;
+        }
+        
+        map.easeTo({ center, duration: 800 });
+      } catch (e) {
+        console.error('Error animating to center:', e);
+        // Fallback: set center without animation
+        if (mapRef.current?.setCenter) {
+          try {
+            mapRef.current.setCenter(center);
+          } catch (err) {
+            console.error('Error setting center:', err);
+          }
+        }
+      }
     }
-  }, [center, loaded]);
+  }, [center, loaded, styleLoaded]);
 
   useEffect(() => {
-    if (!loaded || !mapRef.current) return;
+    if (!styleLoaded || !mapRef.current) return;
     const map = mapRef.current;
 
-    // fog layer
-    const fogSource = 'fog';
-    const fogLayer = 'fog-layer';
-    if (map.getLayer(fogLayer)) map.removeLayer(fogLayer);
-    if (map.getSource(fogSource)) map.removeSource(fogSource);
-    if (fogGeojson) {
-      map.addSource(fogSource, {
-        type: 'geojson',
-        data: typeof fogGeojson === 'string' ? JSON.parse(fogGeojson) : fogGeojson,
-      });
-      map.addLayer({
-        id: fogLayer,
-        type: 'fill',
-        source: fogSource,
-        paint: {
-          'fill-color': '#000',
-          'fill-opacity': 0.82,
-        },
-      });
+    // Ensure map is ready
+    if (!map.getStyle?.()) {
+      console.warn('Map style not ready yet');
+      return;
     }
 
-    // visible glow
-    const visSource = 'visible';
-    const visLayer = 'visible-layer';
-    if (map.getLayer(visLayer)) map.removeLayer(visLayer);
-    if (map.getSource(visSource)) map.removeSource(visSource);
-    if (visibleGeojson) {
-      map.addSource(visSource, {
-        type: 'geojson',
-        data: typeof visibleGeojson === 'string' ? JSON.parse(visibleGeojson) : visibleGeojson,
-      });
-      map.addLayer({
-        id: visLayer,
-        type: 'fill',
-        source: visSource,
-        paint: {
-          'fill-color': '#5af5ff',
-          'fill-opacity': 0.12,
-          'fill-outline-color': '#5af5ff',
-        },
-      });
+    try {
+      // fog layer
+      const fogSource = 'fog';
+      const fogLayer = 'fog-layer';
+      try {
+        if (map.getLayer?.(fogLayer)) map.removeLayer(fogLayer);
+        if (map.getSource?.(fogSource)) map.removeSource(fogSource);
+        if (fogGeojson) {
+          try {
+            const geoData = typeof fogGeojson === 'string' ? JSON.parse(fogGeojson) : fogGeojson;
+            // Check if geojson is valid before adding
+            if (geoData && geoData.type === 'FeatureCollection' && geoData.features) {
+              map.addSource(fogSource, {
+                type: 'geojson',
+                data: geoData,
+              });
+              map.addLayer({
+                id: fogLayer,
+                type: 'fill',
+                source: fogSource,
+                paint: {
+                  'fill-color': '#000',
+                  'fill-opacity': 0.82,
+                },
+              }, 'claims-pulse'); // Place before claims layer so it doesn't cover
+            }
+          } catch (parseError) {
+            console.warn('Failed to parse fog GeoJSON:', parseError);
+          }
+        }
+      } catch (e) {
+        console.error('Error adding fog layer:', e);
+      }
+
+      // visible glow
+      const visSource = 'visible';
+      const visLayer = 'visible-layer';
+      try {
+        if (map.getLayer?.(visLayer)) map.removeLayer(visLayer);
+        if (map.getSource?.(visSource)) map.removeSource(visSource);
+        if (visibleGeojson) {
+          try {
+            const geoData = typeof visibleGeojson === 'string' ? JSON.parse(visibleGeojson) : visibleGeojson;
+            map.addSource(visSource, {
+              type: 'geojson',
+              data: geoData,
+            });
+            map.addLayer({
+              id: visLayer,
+              type: 'fill',
+              source: visSource,
+              paint: {
+                'fill-color': '#5af5ff',
+                'fill-opacity': 0.12,
+                'fill-outline-color': '#5af5ff',
+              },
+            });
+          } catch (parseError) {
+            console.warn('Failed to parse visible GeoJSON:', parseError);
+          }
+        }
+      } catch (e) {
+        console.error('Error adding visible layer:', e);
+      }
+
+      const sourceId = 'claims';
+      try {
+        // Update existing source if it exists, otherwise create new one
+        const existingSource = map.getSource?.(sourceId);
+        const claimsGeoJSON = buildGeoJSON(claims);
+        
+        if (existingSource && existingSource.type === 'geojson') {
+          // Update existing source data instead of recreating
+          try {
+            (existingSource as mapboxgl.GeoJSONSource).setData(claimsGeoJSON);
+          } catch (e) {
+            console.warn('Failed to update claims source, will recreate:', e);
+            // Fallback: recreate the source
+            if (map.getLayer?.('claims-label')) map.removeLayer('claims-label');
+            if (map.getLayer?.('claims-pulse')) map.removeLayer('claims-pulse');
+            map.removeSource(sourceId);
+            throw e; // Re-throw to go to catch block below
+          }
+        } else {
+          throw new Error('Source does not exist or is not GeoJSON'); // Force recreation
+        }
+      } catch (e) {
+        try {
+          // Remove old layers and source if they exist
+          if (map.getLayer?.('claims-label')) map.removeLayer('claims-label');
+          if (map.getLayer?.('claims-pulse')) map.removeLayer('claims-pulse');
+          if (map.getSource?.(sourceId)) map.removeSource(sourceId);
+
+          // Add new source
+          const claimsGeoJSON = buildGeoJSON(claims);
+          map.addSource(sourceId, {
+            type: 'geojson',
+            data: claimsGeoJSON,
+          });
+
+          // Add pulse layer
+          map.addLayer({
+            id: 'claims-pulse',
+            type: 'circle',
+            source: sourceId,
+            paint: {
+              'circle-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                10,
+                4,
+                16,
+                14,
+              ],
+              'circle-color': '#5af5ff',
+              'circle-opacity': 0.35,
+              'circle-stroke-width': 1.2,
+              'circle-stroke-color': '#5af5ff',
+            },
+          });
+
+          // Add label layer
+          map.addLayer({
+            id: 'claims-label',
+            type: 'symbol',
+            source: sourceId,
+            layout: {
+              'text-field': ['get', 'title'],
+              'text-font': ['DIN Pro Medium', 'Arial Unicode MS Bold'],
+              'text-size': 12,
+              'text-offset': [0, 1.2],
+            },
+            paint: {
+              'text-color': '#e5ecff',
+              'text-halo-color': '#050914',
+              'text-halo-width': 1.2,
+            },
+          });
+        } catch (err) {
+          console.error('Error recreating claims layers:', err);
+        }
+      }
+
+      // Only add 3D layer if it doesn't exist (prevent constant recreation)
+      const customLayerId = 'claims-3d';
+      if (!map.getLayer?.(customLayerId)) {
+        try {
+          map.addLayer(makeThreeLayer(customLayerId, claims));
+        } catch (e) {
+          console.error('Error adding 3D layer:', e);
+        }
+      }
+      
+      previousClaimsRef.current = claims;
+    } catch (e) {
+      console.error('Error in layer update effect:', e);
     }
-
-    const sourceId = 'claims';
-    if (map.getLayer('claims-label')) map.removeLayer('claims-label');
-    if (map.getLayer('claims-pulse')) map.removeLayer('claims-pulse');
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
-
-    map.addSource(sourceId, {
-      type: 'geojson',
-      data: buildGeoJSON(claims),
-    });
-
-    map.addLayer({
-      id: 'claims-pulse',
-      type: 'circle',
-      source: sourceId,
-      paint: {
-        'circle-radius': [
-          'interpolate',
-          ['linear'],
-          ['zoom'],
-          10,
-          4,
-          16,
-          14,
-        ],
-        'circle-color': '#5af5ff',
-        'circle-opacity': 0.35,
-        'circle-stroke-width': 1.2,
-        'circle-stroke-color': '#5af5ff',
-      },
-    });
-
-    map.addLayer({
-      id: 'claims-label',
-      type: 'symbol',
-      source: sourceId,
-      layout: {
-        'text-field': ['get', 'title'],
-        'text-font': ['DIN Pro Medium', 'Arial Unicode MS Bold'],
-        'text-size': 12,
-        'text-offset': [0, 1.2],
-      },
-      paint: {
-        'text-color': '#e5ecff',
-        'text-halo-color': '#050914',
-        'text-halo-width': 1.2,
-      },
-    });
-
-    const customLayerId = 'claims-3d';
-    if (map.getLayer(customLayerId)) map.removeLayer(customLayerId);
-    map.addLayer(makeThreeLayer(customLayerId, claims));
-  }, [claims, loaded]);
+  }, [claims, styleLoaded, fogGeojson, visibleGeojson]);
 
   return (
-    <div className="relative w-full h-[70vh] rounded-3xl overflow-hidden shadow-glow">
+    <div className="relative w-full h-full rounded-3xl overflow-hidden shadow-glow group">
       {!mapboxgl.accessToken && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 text-center px-6 text-sm">
           Set NEXT_PUBLIC_MAPBOX_TOKEN to view the map.
         </div>
       )}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full cursor-crosshair" />
+      
+      {/* Zoom Controls */}
+      <div className="absolute top-4 right-4 z-30 flex flex-col gap-2">
+        <button
+          onClick={() => handleZoom('in')}
+          className="bg-white/10 hover:bg-white/20 border border-white/30 hover:border-neon text-white rounded-lg p-2 transition flex items-center justify-center w-10 h-10 font-bold text-lg"
+          title="Zoom In"
+        >
+          +
+        </button>
+        <button
+          onClick={() => handleZoom('out')}
+          className="bg-white/10 hover:bg-white/20 border border-white/30 hover:border-neon text-white rounded-lg p-2 transition flex items-center justify-center w-10 h-10 font-bold text-lg"
+          title="Zoom Out"
+        >
+          −
+        </button>
+      </div>
+      
+      {onLocationSelect && (
+        <div className="absolute bottom-4 left-4 z-20 px-3 py-2 rounded-lg bg-black/60 border border-neon/50 text-xs text-neon animate-pulse">
+          ✓ Click map to select location
+        </div>
+      )}
     </div>
   );
 }

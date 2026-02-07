@@ -1,7 +1,6 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000';
 
 export interface ClaimPayload {
-  owner_id: string;
   lat: number;
   lon: number;
   address_label: string;
@@ -23,9 +22,15 @@ export async function fetchNearby(lat: number, lon: number, radius_m = 2000) {
 }
 
 export async function createClaim(payload: ClaimPayload) {
+  const token = localStorage.getItem('turf_token');
+  if (!token) throw new Error('Not authenticated');
+  
   const res = await fetch(`${API_BASE}/claims`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -33,9 +38,13 @@ export async function createClaim(payload: ClaimPayload) {
 }
 
 export async function createBuild(payload: BuildPayload) {
+  const token = localStorage.getItem('turf_token');
   const res = await fetch(`${API_BASE}/builds`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` }),
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -98,5 +107,97 @@ export async function login(username: string, password: string) {
 export async function me(token: string) {
   const res = await fetch(`${API_BASE}/me`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('auth failed');
+  return res.json();
+}
+
+export async function fetchMessages(token: string, roomId: string, offset: number = 0, limit: number = 50) {
+  const params = new URLSearchParams({
+    room_id: encodeURIComponent(roomId),
+    offset: String(offset),
+    limit: String(limit),
+  });
+  const res = await fetch(`${API_BASE}/messages?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    console.warn('Failed to fetch messages:', await res.text());
+    return [];
+  }
+  return res.json();
+}
+
+export async function fetchUserProfile(userId: string) {
+  const res = await fetch(`${API_BASE}/users/${userId}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function verifyUser(userId: string, token: string) {
+  const res = await fetch(`${API_BASE}/users/${userId}/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function fetchTopRooms(limit = 10) {
+  const res = await fetch(`${API_BASE}/chatrooms/top?limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to load top rooms');
+  return res.json();
+}
+
+export async function fetchMyClaims(token: string) {
+  const res = await fetch(`${API_BASE}/my-claims`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to load claims');
+  return res.json();
+}
+
+export interface BuildUpdate {
+  prefab: string;
+  flag?: string;
+  decal?: string;
+  height_m: number;
+}
+
+export async function updateBuild(buildId: string, payload: BuildUpdate, token: string) {
+  const res = await fetch(`${API_BASE}/builds/${buildId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteClaim(claimId: string, token: string) {
+  const res = await fetch(`${API_BASE}/claims/${claimId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateClaimLabel(claimId: string, addressLabel: string, token: string) {
+  const res = await fetch(`${API_BASE}/claims/${claimId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ address_label: addressLabel }),
+  });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

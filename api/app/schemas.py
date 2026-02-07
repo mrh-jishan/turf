@@ -47,7 +47,6 @@ class ProfileUpdate(BaseModel):
 
 
 class ClaimCreate(BaseModel):
-    owner_id: str
     lat: float
     lon: float
     address_label: str
@@ -143,6 +142,7 @@ class MessageCreate(BaseModel):
 class MessageOut(BaseModel):
     id: str
     sender_id: str
+    sender_handle: Optional[str] = None
     room_id: str
     body: str
     attachment_url: Optional[str]
@@ -229,3 +229,8 @@ class VisibilityOut(BaseModel):
 class FogOut(BaseModel):
     fog_geojson: str
     visible_sources: int
+
+
+class TopRoom(BaseModel):
+    room_id: str
+    online_count: int

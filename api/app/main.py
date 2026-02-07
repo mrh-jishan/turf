@@ -15,7 +15,7 @@ from .database import Base, engine, get_session
 from .models import Build, Claim, User
 from .schemas import BuildCreate, BuildOut, ClaimCreate, ClaimOut, NearbyQuery, UserCreate, UserOut
 from .routes import router as api_router
-from .deps import get_current_user_optional
+from .deps import get_current_user_optional, get_current_user
 
 app = FastAPI(
     title=settings.app_name,
@@ -275,7 +275,17 @@ async def create_user(payload: UserCreate, session: AsyncSession = Depends(get_s
 
 
 @app.post("/claims", response_model=ClaimOut)
-async def create_claim(payload: ClaimCreate, session: AsyncSession = Depends(get_session)):
+async def create_claim(
+    payload: ClaimCreate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a claim at a specific location.
+    
+    Uses the authenticated user as the owner.
+    Enforces single claim per ~20m grid.
+    Users can have multiple claims.
+    """
     # enforce single claim per coordinate (approx 20m grid by rounding 5th decimal ~1.1m)
     pt_wkt = f"SRID=4326;POINT({payload.lon} {payload.lat})"
     existing = await session.execute(
@@ -285,7 +295,7 @@ async def create_claim(payload: ClaimCreate, session: AsyncSession = Depends(get
         raise HTTPException(status_code=409, detail="location already claimed")
 
     claim = Claim(
-        owner_id=payload.owner_id,
+        owner_id=current_user.id,
         address_label=payload.address_label,
         location=pt_wkt,
     )
@@ -294,7 +304,7 @@ async def create_claim(payload: ClaimCreate, session: AsyncSession = Depends(get
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=400, detail="owner already has a claim or invalid owner")
+        raise HTTPException(status_code=400, detail="failed to create claim")
     await session.refresh(claim)
     lon, lat = payload.lon, payload.lat
     return ClaimOut(
@@ -327,6 +337,150 @@ async def nearby(q: NearbyQuery = Depends(), session: AsyncSession = Depends(get
             )
         )
     return claims
+
+
+@app.delete("/claims/{claim_id}")
+async def delete_claim(
+    claim_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a claim owned by the current user."""
+    from uuid import UUID
+    try:
+        cid = UUID(claim_id)
+    except:
+        raise HTTPException(status_code=400, detail="invalid claim_id")
+    
+    claim = await session.get(Claim, cid)
+    if not claim:
+        raise HTTPException(status_code=404, detail="claim not found")
+    
+    if claim.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="not authorized")
+    
+    # Delete the claim (cascades to builds)
+    await session.delete(claim)
+    await session.commit()
+    
+    return {"status": "deleted"}
+
+
+@app.patch("/claims/{claim_id}")
+async def update_claim(
+    claim_id: str,
+    payload: dict,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a claim's address label."""
+    from uuid import UUID
+    try:
+        cid = UUID(claim_id)
+    except:
+        raise HTTPException(status_code=400, detail="invalid claim_id")
+    
+    claim = await session.get(Claim, cid)
+    if not claim:
+        raise HTTPException(status_code=404, detail="claim not found")
+    
+    if claim.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="not authorized")
+    
+    if "address_label" in payload:
+        claim.address_label = payload["address_label"]
+    
+    await session.commit()
+    await session.refresh(claim)
+    
+    # Get coordinates
+    result = await session.execute(
+        select(func.ST_X(func.ST_AsText(Claim.location)), func.ST_Y(func.ST_AsText(Claim.location)))
+        .where(Claim.id == claim.id)
+    )
+    lon, lat = result.scalar()
+    
+    return ClaimOut(
+        id=str(claim.id),
+        owner_id=str(claim.owner_id),
+        address_label=claim.address_label,
+        lat=float(lat),
+        lon=float(lon),
+    )
+
+
+@app.get("/my-claims", response_model=List[dict])
+async def my_claims(session: AsyncSession = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """Get all claims owned by the current user with their builds."""
+    result = await session.execute(
+        select(Claim, func.ST_X(func.ST_AsText(Claim.location)), func.ST_Y(func.ST_AsText(Claim.location)))
+        .where(Claim.owner_id == current_user.id)
+    )
+    rows = result.all()
+    claims = []
+    for claim, lon, lat in rows:
+        # Get builds for this claim
+        builds_result = await session.execute(select(Build).where(Build.claim_id == claim.id))
+        builds = builds_result.scalars().all()
+        
+        claims.append({
+            "id": str(claim.id),
+            "owner_id": str(claim.owner_id),
+            "address_label": claim.address_label,
+            "lat": float(lat),
+            "lon": float(lon),
+            "created_at": claim.created_at.isoformat(),
+            "builds": [
+                {
+                    "id": str(b.id),
+                    "claim_id": str(b.claim_id),
+                    "prefab": b.prefab,
+                    "flag": b.flag,
+                    "decal": b.decal,
+                    "height_m": b.height_m,
+                    "created_at": b.created_at.isoformat()
+                } for b in builds
+            ]
+        })
+    return claims
+
+
+@app.put("/builds/{build_id}", response_model=BuildOut)
+async def update_build(
+    build_id: str,
+    payload: BuildCreate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a build's properties (prefab, flag, decal, height_m).
+    
+    User must own the claim associated with the build.
+    """
+    # Get the build
+    from uuid import UUID
+    try:
+        bid = UUID(build_id)
+    except:
+        raise HTTPException(status_code=400, detail="invalid build_id")
+    
+    build = await session.get(Build, bid)
+    if not build:
+        raise HTTPException(status_code=404, detail="build not found")
+    
+    # Verify ownership (user must own the claim)
+    claim = await session.get(Claim, build.claim_id)
+    if not claim or claim.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="not authorized")
+    
+    # Update fields
+    build.prefab = payload.prefab
+    build.flag = payload.flag
+    build.decal = payload.decal
+    build.height_m = payload.height_m
+    
+    await session.commit()
+    await session.refresh(build)
+    return build
 
 
 @app.post("/builds", response_model=BuildOut)

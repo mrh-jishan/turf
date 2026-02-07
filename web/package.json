@@ -16,6 +16,7 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
+    "@types/node": "25.2.1",
     "@types/react": "18.2.8",
     "@types/react-dom": "18.2.4",
     "autoprefixer": "10.4.16",

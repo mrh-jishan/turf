@@ -1,4 +1,4 @@
-from typing import Dict, Set
+from typing import Dict, Set, List, Tuple
 from fastapi import WebSocket
 
 class ChatManager:
@@ -26,5 +26,13 @@ class ChatManager:
                 dead.append(ws)
         for ws in dead:
             self.disconnect(room_id, ws)
+
+    def get_top_rooms(self, limit: int = 10) -> List[Tuple[str, int]]:
+        """
+        Get top rooms by online user count.
+        Returns list of (room_id, user_count) tuples sorted by user count descending.
+        """
+        room_counts = [(room_id, len(connections)) for room_id, connections in self.rooms.items()]
+        return sorted(room_counts, key=lambda x: x[1], reverse=True)[:limit]
 
 manager = ChatManager()
