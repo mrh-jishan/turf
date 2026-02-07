@@ -28,20 +28,45 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
   const [isSending, setIsSending] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
   const shouldLoadMoreRef = useRef(true);
+  const isNearBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(0);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Check if user is scrolled near bottom
+  const checkIfNearBottom = () => {
+    if (!messagesContainerRef.current) return true;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    return scrollHeight - scrollTop - clientHeight < 100;
   };
 
+  // Scroll to bottom using direct scrollTop manipulation (avoids layout thrash)
+  const scrollToBottom = () => {
+    if (!isNearBottomRef.current || !messagesContainerRef.current) return;
+    messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+  };
+
+  // Only scroll when new messages arrive (WebSocket), not on pagination
   useEffect(() => {
-    scrollToBottom();
+    if (messages.length > prevMessageCountRef.current) {
+      scrollToBottom();
+      prevMessageCountRef.current = messages.length;
+    }
   }, [messages]);
 
-  // Fetch message history when room_id changes
+  // Track scroll position
+  const handleScroll = () => {
+    isNearBottomRef.current = checkIfNearBottom();
+    
+    if (!messagesContainerRef.current || isLoadingMore || !shouldLoadMoreRef.current) return;
+    
+    const { scrollTop } = messagesContainerRef.current;
+    if (scrollTop < 50) {
+      // User scrolled near top, load older messages
+      loadOlderMessages();
+    }
+  };
   useEffect(() => {
     if (!token || !roomId) return;
     
@@ -49,6 +74,7 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
     offsetRef.current = 0;
     shouldLoadMoreRef.current = true;
     setIsLoadingMore(false);
+    prevMessageCountRef.current = 0;
     
     fetchMessages(token, roomId, 0, 50)
       .then((msgs) => {
@@ -64,6 +90,7 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
           created_at: m.created_at,
         }));
         setMessages(formattedMessages);
+        prevMessageCountRef.current = formattedMessages.length;
         offsetRef.current = 50;
         shouldLoadMoreRef.current = msgs.length === 50;
       })
@@ -75,17 +102,6 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
       cancelled = true;
     };
   }, [token, roomId]);
-
-  // Handle scroll for lazy loading older messages
-  const handleScroll = () => {
-    if (!messagesContainerRef.current || isLoadingMore || !shouldLoadMoreRef.current) return;
-    
-    const { scrollTop } = messagesContainerRef.current;
-    if (scrollTop < 50) {
-      // User scrolled near top, load older messages
-      loadOlderMessages();
-    }
-  };
 
   const loadOlderMessages = async () => {
     if (!token || !roomId || isLoadingMore || !shouldLoadMoreRef.current) return;
@@ -105,8 +121,13 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
         created_at: m.created_at,
       }));
 
-      // Prepend older messages
-      setMessages((prev) => [...formattedMessages, ...prev]);
+      // Prepend older messages, filtering out duplicates
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const uniqueOlderMessages = formattedMessages.filter((m) => !existingIds.has(m.id));
+        return [...uniqueOlderMessages, ...prev];
+      });
+      
       offsetRef.current += 50;
       shouldLoadMoreRef.current = olderMessages.length === 50;
     } catch (err) {
@@ -129,7 +150,14 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
       try {
         const data = JSON.parse(ev.data);
         if (data.type === 'message') {
-          setMessages((prev) => [...prev.slice(-99), data as Message]);
+          setMessages((prev) => {
+            // Check if message already exists to prevent duplicates
+            if (prev.some((m) => m.id === data.id)) {
+              return prev;
+            }
+            // Keep only the most recent 200 messages to prevent memory leak
+            return [...prev.slice(-199), data as Message];
+          });
         }
       } catch (error) {
         console.error('Failed to parse message:', error);
@@ -280,7 +308,6 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
             </div>
           ))
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
