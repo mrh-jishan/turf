@@ -1,41 +1,56 @@
 import { useEffect, useState } from 'react';
+import { fetchPreviousRooms, trackRoomAccess } from '../lib/api';
 
 interface Props {
   roomId: string;
   onRoomChange: (roomId: string) => void;
+  token?: string | null;
 }
 
 interface PreviousRoom {
   room_id: string;
-  accessed_at: number;
+  last_accessed: string;
 }
 
-export default function RoomPanel({ roomId, onRoomChange }: Props) {
+export default function RoomPanel({ roomId, onRoomChange, token }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [newRoomId, setNewRoomId] = useState(roomId);
   const [copiedText, setCopiedText] = useState('');
   const [previousRooms, setPreviousRooms] = useState<PreviousRoom[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Load history from localStorage on mount
+  // Load previous rooms when component mounts
   useEffect(() => {
-    const stored = localStorage.getItem('previous-rooms');
-    const rooms = stored ? JSON.parse(stored) : [];
-    setPreviousRooms(rooms);
-  }, []);
+    const loadPreviousRooms = async () => {
+      if (!token) return;
+      setIsLoading(true);
+      try {
+        const rooms = await fetchPreviousRooms(token);
+        setPreviousRooms(rooms);
+      } catch (err) {
+        console.error('Failed to load previous rooms:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadPreviousRooms();
+  }, [token]);
 
-  // Add current room to history when roomId changes
+  // Track room access when roomId changes
   useEffect(() => {
-    if (roomId && roomId !== 'demo-room') {
-      const stored = localStorage.getItem('previous-rooms');
-      const rooms = stored ? JSON.parse(stored) : [];
-      const newRooms = [
-        { room_id: roomId, accessed_at: Date.now() },
-        ...rooms.filter((r: PreviousRoom) => r.room_id !== roomId),
-      ].slice(0, 20); // Keep only last 20 rooms
-      setPreviousRooms(newRooms);
-      localStorage.setItem('previous-rooms', JSON.stringify(newRooms));
-    }
-  }, [roomId]);
+    const trackAccess = async () => {
+      if (!token || !roomId || roomId === 'demo-room') return;
+      try {
+        await trackRoomAccess(token, roomId);
+        // Refresh the previous rooms list
+        const rooms = await fetchPreviousRooms(token);
+        setPreviousRooms(rooms);
+      } catch (err) {
+        console.error('Failed to track room access:', err);
+      }
+    };
+    trackAccess();
+  }, [roomId, token]);
 
   const handleSave = () => {
     if (newRoomId.trim() && newRoomId !== roomId) {

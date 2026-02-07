@@ -195,11 +195,18 @@ export default function Map({ center, zoom = 14, claims = [], fogGeojson, visibl
   useEffect(() => {
     if (!mapRef.current) return;
     // Trigger map resize when expand/collapse happens
+    // Call resize multiple times to ensure proper reflow
     const timeoutId = setTimeout(() => {
       if (mapRef.current) {
         mapRef.current.resize();
+        // Call again after a brief delay to ensure proper reflow
+        setTimeout(() => {
+          if (mapRef.current) {
+            mapRef.current.resize();
+          }
+        }, 100);
       }
-    }, 300); // Match the transition duration
+    }, 350); // Slightly longer than the transition duration (300ms)
     return () => clearTimeout(timeoutId);
   }, [isExpanded]);
 

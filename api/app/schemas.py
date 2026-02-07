@@ -1,4 +1,5 @@
 from typing import Optional, List
+from datetime import datetime
 from pydantic import BaseModel, Field, validator
 
 
@@ -234,3 +235,11 @@ class FogOut(BaseModel):
 class TopRoom(BaseModel):
     room_id: str
     online_count: int
+
+
+class RoomAccessOut(BaseModel):
+    room_id: str
+    last_accessed: datetime
+
+    class Config:
+        from_attributes = True

@@ -133,3 +133,14 @@ class Build(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     claim = relationship("Claim", back_populates="builds")
+
+
+class RoomAccess(Base):
+    __tablename__ = "room_access"
+    __table_args__ = (UniqueConstraint("user_id", "room_id", name="uq_room_access"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    room_id = Column(String(255), nullable=False)  # room_id is a string (UUID or custom)
+    accessed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_accessed = Column(DateTime, default=datetime.utcnow, nullable=False)

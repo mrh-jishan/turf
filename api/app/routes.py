@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import schemas
 from .chat_manager import manager
 from .deps import get_current_user, get_db
-from .models import Build, Claim, Connection, Inventory, Message, StoreItem, User, ChatRoom, ChatMember, SupplyPath, VisibleArea
+from .models import Build, Claim, Connection, Inventory, Message, StoreItem, User, ChatRoom, ChatMember, SupplyPath, VisibleArea, RoomAccess
 from .security import create_access_token, get_password_hash, verify_password, decode_token, verify_google_token
 
 router = APIRouter()
@@ -385,6 +385,60 @@ async def top_rooms(limit: int = 10):
     """
     top = manager.get_top_rooms(limit)
     return [schemas.TopRoom(room_id=room_id, online_count=count) for room_id, count in top]
+
+
+@router.post("/chatrooms/access", tags=["Chat"])
+async def track_room_access(room_id: str = Query(...), db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Track user's room access for room history.
+    
+    Records when a user accesses a chat room to build their previous rooms list.
+    """
+    if not room_id or room_id == "demo-room":
+        return {"status": "ok"}
+    
+    # Try to find existing access record
+    result = await db.execute(
+        select(RoomAccess).where(
+            and_(RoomAccess.user_id == current.id, RoomAccess.room_id == room_id)
+        )
+    )
+    access = result.scalars().first()
+    
+    if access:
+        # Update last_accessed time
+        access.last_accessed = datetime.utcnow()
+    else:
+        # Create new access record
+        access = RoomAccess(user_id=current.id, room_id=room_id)
+        db.add(access)
+    
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/chatrooms/previous", response_model=List[schemas.RoomAccessOut], tags=["Chat"])
+async def get_previous_rooms(db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Get user's previously accessed chat rooms.
+    
+    Returns list of up to 20 most recently accessed rooms, ordered by last access time.
+    """
+    result = await db.execute(
+        select(RoomAccess)
+        .where(RoomAccess.user_id == current.id)
+        .order_by(RoomAccess.last_accessed.desc())
+        .limit(20)
+    )
+    rooms = result.scalars().all()
+    return [
+        {
+            "room_id": room.room_id,
+            "last_accessed": room.last_accessed,
+        }
+        for room in rooms
+    ]
+
 
 
 @router.post("/messages", response_model=schemas.MessageOut, tags=["Chat"])

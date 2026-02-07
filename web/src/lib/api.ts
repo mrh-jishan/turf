@@ -150,6 +150,23 @@ export async function fetchTopRooms(limit = 10) {
   return res.json();
 }
 
+export async function trackRoomAccess(token: string, roomId: string) {
+  const res = await fetch(`${API_BASE}/chatrooms/access?room_id=${encodeURIComponent(roomId)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to track room access');
+  return res.json();
+}
+
+export async function fetchPreviousRooms(token: string) {
+  const res = await fetch(`${API_BASE}/chatrooms/previous`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to load previous rooms');
+  return res.json();
+}
+
 export async function fetchMyClaims(token: string) {
   const res = await fetch(`${API_BASE}/my-claims`, {
     headers: { Authorization: `Bearer ${token}` },

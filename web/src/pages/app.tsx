@@ -221,13 +221,19 @@ export default function AppPage() {
           </div>
         </header>
 
-        <section className={`${isMapExpanded ? 'w-full h-screen' : 'mt-3 gap-6 h-[calc(100vh-200px)] grid lg:grid-cols-[1.8fr_1.1fr_1.1fr] md:grid-cols-[2fr_1fr] sm:grid-cols-1 grid-cols-1'} transition-all duration-300`}>
+        <section className={`${isMapExpanded ? 'w-full h-screen' : 'mt-3 gap-6 h-[calc(100vh-200px)] grid lg:grid-cols-[1.8fr_1.1fr_1.1fr] md:grid-cols-[2fr_1fr] sm:grid-cols-1 grid-cols-1'} transition-all duration-300 overflow-hidden`}>
           {/* Map - Left Column */}
-          <div className={`relative min-h-[300px] transition-all duration-300 ${isMapExpanded ? 'w-full h-full' : 'sm:col-span-1 md:col-span-1 lg:col-span-1'}`}>
+          <div className={`relative min-h-[300px] transition-all duration-300 overflow-hidden ${isMapExpanded ? 'w-full h-full' : 'h-full'}`}>
             <Map center={center} zoom={zoom} claims={claims} fogGeojson={fogGeojson} visibleGeojson={visibleGeojson} isExpanded={isMapExpanded} onLocationSelect={(lat, lon) => { setLat(lat); setLon(lon); }} />
 
             <button
-              onClick={() => setIsMapExpanded(!isMapExpanded)}
+              onClick={() => {
+                setIsMapExpanded(!isMapExpanded);
+                // Reset zoom to default when collapsing map
+                if (isMapExpanded) {
+                  setZoom(14);
+                }
+              }}
               className={`absolute z-20 p-2 bg-neon/20 hover:bg-neon/30 border border-neon rounded-lg text-neon font-bold transition ${isMapExpanded ? 'top-4 right-4' : 'top-4 right-24'}`}
               title={isMapExpanded ? 'Collapse map' : 'Expand map'}
             >
@@ -551,7 +557,7 @@ export default function AppPage() {
                 <RoomPanel roomId={roomId} onRoomChange={(newRoomId) => {
                   setRoomId(newRoomId);
                   setIsRoomSidebarOpen(false);
-                }} />
+                }} token={token} />
               </div>
             </div>
           </div>
@@ -604,7 +610,7 @@ export default function AppPage() {
                   <RoomPanel roomId={roomId} onRoomChange={(newRoomId) => {
                     setRoomId(newRoomId);
                     setIsRoomSidebarOpen(false);
-                  }} />
+                  }} token={token} />
                 </div>
               </div>
             </div>
