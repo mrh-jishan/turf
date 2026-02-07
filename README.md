@@ -5,6 +5,8 @@
 - `web/`: Next.js PWA shell with Mapbox view (USA-only placeholder).
 - `infra/`: Docker Compose for local PostGIS + API.
 
+![Turf App Demo](doc/demo.png)
+
 ## Quick start (local, Docker)
 ```bash
 cd infra
@@ -48,3 +50,5 @@ npm run dev
 - WebSocket presence + drive-by pings.
 - Voxel prefab rendering via Threebox (map-anchored 3D).
 - Abuse protections: rate limits, US geofence, weekly re-verify presence.
+
+
