@@ -16,6 +16,12 @@ class UserOut(BaseModel):
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
 
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
+
     class Config:
         orm_mode = True
 
@@ -56,6 +62,12 @@ class ClaimOut(BaseModel):
     lat: float
     lon: float
 
+    @validator('id', 'owner_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
+
     class Config:
         orm_mode = True
 
@@ -81,6 +93,12 @@ class BuildOut(BaseModel):
     flag: Optional[str]
     height_m: int
 
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
+
     class Config:
         orm_mode = True
 
@@ -94,6 +112,12 @@ class ConnectionOut(BaseModel):
     requester_id: str
     addressee_id: str
     status: str
+
+    @validator('id', 'requester_id', 'addressee_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
 
     class Config:
         orm_mode = True
@@ -115,6 +139,12 @@ class MessageOut(BaseModel):
     attachment_type: Optional[str]
     created_at: str
 
+    @validator('id', 'sender_id', 'room_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
+
     class Config:
         orm_mode = True
 
@@ -128,6 +158,12 @@ class StoreItemOut(BaseModel):
     meta: Optional[str]
     active: bool
 
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
+
     class Config:
         orm_mode = True
 
@@ -137,6 +173,12 @@ class InventoryOut(BaseModel):
     user_id: str
     item_id: str
     acquired_at: str
+
+    @validator('id', 'user_id', 'item_id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
 
     class Config:
         orm_mode = True
@@ -152,6 +194,12 @@ class ChatRoomOut(BaseModel):
     id: str
     name: str
     is_group: bool
+
+    @validator('id', pre=True)
+    def convert_uuid_to_str(cls, v):
+        if hasattr(v, 'hex'):  # UUID object
+            return str(v)
+        return v
 
     class Config:
         orm_mode = True

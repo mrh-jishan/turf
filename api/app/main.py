@@ -1,8 +1,10 @@
 import asyncio
-from typing import List
+from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +15,38 @@ from .database import Base, engine, get_session
 from .models import Build, Claim, User
 from .schemas import BuildCreate, BuildOut, ClaimCreate, ClaimOut, NearbyQuery, UserCreate, UserOut
 from .routes import router as api_router
+from .deps import get_current_user_optional
 
-app = FastAPI(title=settings.app_name, version="0.1.0", openapi_url="/openapi.json")
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+    description="A collaborative geospatial application for exploring and building in shared worlds. Features user authentication, social connections, real-time chat, and FOG-based visibility mechanics.",
+    openapi_url="/openapi.json",
+    docs_url=None,  # Disable default docs
+    redoc_url=None,  # Disable default redoc
+)
+
+# Override OpenAPI schema to use 3.0.3 instead of 3.1.0 for Swagger UI compatibility
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    from fastapi.openapi.utils import get_openapi
+    
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        openapi_version="3.0.3",  # Force 3.0.3 for Swagger UI v3 compatibility
+    )
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# Initialize Jinja2 templates
+templates = Jinja2Templates(directory="app/templates")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,15 +59,174 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    """Initialize database tables on application startup."""
     # Ensure tables exist in local/dev. In prod use migrations.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 app.include_router(api_router)
 
-@app.get("/health")
+
+@app.get("/openapi.json", tags=["Documentation"], include_in_schema=False)
+async def get_openapi():
+    """Get the OpenAPI schema."""
+    return JSONResponse(app.openapi())
+
+
+@app.get("/", tags=["Pages"])
+async def root(current_user: Optional[User] = Depends(get_current_user_optional)):
+    """
+    Root endpoint redirects to home if authenticated, login if not.
+    """
+    if current_user:
+        return RedirectResponse(url="/home", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+
+@app.get("/health", tags=["Health"])
 async def health():
+    """Check if the API is running and healthy."""
     return {"status": "ok"}
+
+
+@app.get("/docs", tags=["Documentation"])
+async def docs_redirect(current_user: Optional[User] = Depends(get_current_user_optional)):
+    """
+    Redirect to API documentation.
+    
+    Only authenticated users can access the interactive API docs.
+    If not logged in, redirects to login page.
+    """
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    
+    from fastapi.responses import HTMLResponse
+    
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Turf API Docs</title>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@3/swagger-ui.css">
+        <style>
+            html {
+                box-sizing: border-box;
+                overflow: -moz-scrollbars-vertical;
+                overflow-y: scroll;
+            }
+            *, *:before, *:after {
+                box-sizing: inherit;
+            }
+            body {
+                margin: 0;
+                padding: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3/swagger-ui.js"></script>
+        <script src="https://unpkg.com/swagger-ui-dist@3/swagger-ui-bundle.js"></script>
+        <script>
+            window.onload = function() {
+                SwaggerUIBundle({
+                    url: "/openapi.json",
+                    dom_id: '#swagger-ui',
+                    deepLinking: true,
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIBundle.SwaggerUIStandalonePreset
+                    ],
+                    plugins: [
+                        SwaggerUIBundle.plugins.DownloadUrl
+                    ],
+                    layout: "BaseLayout"
+                })
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(html)
+
+
+@app.get("/redoc", tags=["Documentation"])
+async def redoc_redirect(current_user: Optional[User] = Depends(get_current_user_optional)):
+    """
+    Redirect to ReDoc documentation.
+    
+    Only authenticated users can access the ReDoc API docs.
+    """
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    
+    from fastapi.openapi.docs import get_redoc_html
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title="ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@latest/bundles/redoc.standalone.js",
+    )
+
+
+@app.get("/login", tags=["Authentication"])
+async def login_page(
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    Display login page.
+    
+    If already logged in, redirects to /home.
+    Shows options for email/password login and Google Sign-In.
+    """
+    if current_user:
+        return RedirectResponse(url="/home", status_code=status.HTTP_302_FOUND)
+    
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/register", tags=["Authentication"])
+async def register_page(
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    Display registration page.
+    
+    If already logged in, redirects to /home.
+    Shows form for creating new account with email, handle, and password.
+    """
+    if current_user:
+        return RedirectResponse(url="/home", status_code=status.HTTP_302_FOUND)
+    
+    return templates.TemplateResponse("register.html", {"request": request})
+
+
+@app.get("/home", tags=["Pages"])
+async def home(
+    request: Request,
+    current_user: User = Depends(get_current_user_optional)
+):
+    """
+    Home page for logged-in users.
+    
+    Redirects to login if not authenticated.
+    """
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    
+    return templates.TemplateResponse(
+        "home.html",
+        {
+            "request": request,
+            "handle": current_user.handle,
+            "email": current_user.email,
+            "bio": current_user.bio,
+            "verified": current_user.verified,
+        }
+    )
 
 
 @app.post("/users", response_model=UserOut)

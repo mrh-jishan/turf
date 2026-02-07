@@ -20,7 +20,10 @@ services:
       context: ../api
       dockerfile: Dockerfile
     env_file:
-      - ../api/.env.example
+      - ../api/.env
+    environment:
+      # Override for Docker network - use service name instead of localhost
+      DATABASE_URL: postgresql+asyncpg://turf:turf@db:5432/turf
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -34,8 +37,9 @@ services:
     env_file:
       - ../web/.env.local
     environment:
-      # fallback if not set in env file; ensures API resolves inside the network
+      # Override for Docker network - use service name instead of localhost
       NEXT_PUBLIC_API_BASE: http://api:8000
+      NEXT_PUBLIC_WS_BASE: ws://api:8000
     ports:
       - "3000:3000"
     restart: unless-stopped

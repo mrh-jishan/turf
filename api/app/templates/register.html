@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Turf - Sign Up{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h1>🌍 Turf</h1>
+        <div class="subtitle">Create your account and explore the world</div>
+        
+        {% if request.query_params.get('error') %}
+        <div class="error show">
+            {% if request.query_params.get('error') == 'handle_or_email_taken' %}
+                Handle or email is already taken
+            {% elif request.query_params.get('error') == 'password_too_short' %}
+                Password must be at least 6 characters
+            {% elif request.query_params.get('error') == 'invalid_handle_length' %}
+                Handle must be 3-30 characters
+            {% elif request.query_params.get('error') == 'missing_fields' %}
+                All fields are required
+            {% else %}
+                {{ request.query_params.get('error') }}
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="/register">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="handle">Username</label>
+                <input type="text" id="handle" name="handle" required minlength="3" maxlength="30">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required minlength="6">
+            </div>
+            <button type="submit">Create Account</button>
+        </form>
+        
+        <div class="divider">or</div>
+        
+        <div class="google-signin">
+            <div id="g_id_onload"
+                 data-client_id="CLIENT_ID_PLACEHOLDER"
+                 data-callback="handleCredentialResponse">
+            </div>
+            <div class="g_id_signin" data-type="standard"></div>
+        </div>
+        
+        <div class="link-group">
+            Already have an account? <a href="/login">Sign in</a>
+        </div>
+    </div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+    function handleCredentialResponse(response) {
+        console.log('Google token received');
+        
+        // Create hidden form to submit Google token
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/auth/google';
+        
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'id_token';
+        input.value = response.credential;
+        
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+    }
+    
+    window.onload = function () {
+        google.accounts.id.initialize({client_id: 'CLIENT_ID_PLACEHOLDER'});
+    }
+</script>
+{% endblock %}

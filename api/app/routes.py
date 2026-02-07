@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import and_, or_, select, func
 from sqlalchemy.exc import IntegrityError
@@ -11,40 +12,172 @@ from . import schemas
 from .chat_manager import manager
 from .deps import get_current_user, get_db
 from .models import Build, Claim, Connection, Inventory, Message, StoreItem, User, ChatRoom, ChatMember, SupplyPath, VisibleArea
-from .security import create_access_token, get_password_hash, verify_password, decode_token
+from .security import create_access_token, get_password_hash, verify_password, decode_token, verify_google_token
 
 router = APIRouter()
 
-@router.post("/register", response_model=schemas.UserOut)
-async def register(payload: schemas.UserCreate, db: AsyncSession = Depends(get_db)):
-    user = User(handle=payload.handle, email=payload.email, password_hash=get_password_hash(payload.password))
+@router.post("/auth/google", tags=["Authentication"])
+async def google_auth(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Authenticate with Google Sign-In via form submission.
+    Redirects to /home on success or /login on error.
+    """
+    try:
+        form_data = await request.form()
+        id_token = form_data.get("id_token")
+    except:
+        return RedirectResponse(url="/login?error=invalid_request", status_code=302)
+    
+    if not id_token:
+        return RedirectResponse(url="/login?error=missing_token", status_code=302)
+    
+    google_user = await verify_google_token(id_token)
+    if not google_user:
+        return RedirectResponse(url="/login?error=invalid_token", status_code=302)
+    
+    # Try to find or create user
+    result = await db.execute(select(User).where(User.email == google_user["email"]))
+    user = result.scalars().first()
+    
+    if not user:
+        # Create new user from Google
+        user = User(
+            handle=google_user["email"].split("@")[0],
+            email=google_user["email"],
+            password_hash=get_password_hash("google_oauth"),  # Placeholder
+        )
+        db.add(user)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            # Handle if handle already exists
+            base_handle = google_user["email"].split("@")[0]
+            for i in range(1, 100):
+                user = User(
+                    handle=f"{base_handle}{i}",
+                    email=google_user["email"],
+                    password_hash=get_password_hash("google_oauth"),
+                )
+                db.add(user)
+                try:
+                    await db.commit()
+                    break
+                except IntegrityError:
+                    await db.rollback()
+    
+    token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(days=7))
+    
+    response = RedirectResponse(url="/home", status_code=302)
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        max_age=604800,  # 7 days
+        httponly=True,
+        secure=False,
+        samesite="lax"
+    )
+    return response
+
+@router.post("/register", tags=["Authentication"])
+async def register(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Register a new user account via form submission.
+    Redirects to /login on success or back to /register on error.
+    """
+    try:
+        form_data = await request.form()
+        handle = form_data.get("handle")
+        email = form_data.get("email")
+        password = form_data.get("password")
+    except:
+        return RedirectResponse(url="/register?error=invalid_request", status_code=302)
+    
+    if not handle or not email or not password:
+        return RedirectResponse(url="/register?error=missing_fields", status_code=302)
+    
+    if len(password) < 6:
+        return RedirectResponse(url="/register?error=password_too_short", status_code=302)
+    
+    if len(handle) < 3 or len(handle) > 30:
+        return RedirectResponse(url="/register?error=invalid_handle_length", status_code=302)
+    
+    user = User(handle=handle, email=email, password_hash=get_password_hash(password))
     db.add(user)
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=400, detail="handle or email already used")
-    await db.refresh(user)
-    return user
+        return RedirectResponse(url="/register?error=handle_or_email_taken", status_code=302)
+    
+    # Redirect to login after successful registration
+    return RedirectResponse(url="/login?success=registered", status_code=302)
 
 
-@router.post("/login", response_model=schemas.Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+
+
+@router.post("/login", tags=["Authentication"])
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    """
+    Authenticate with email/password via form submission.
+    Sets HTTP-only cookie and redirects to /home on success.
+    """
     result = await db.execute(select(User).where(or_(User.email == form_data.username, User.handle == form_data.username)))
     user = result.scalars().first()
     if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+        return RedirectResponse(url="/login?error=invalid_credentials", status_code=302)
+    
     token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(days=7))
-    return schemas.Token(access_token=token)
+    
+    response = RedirectResponse(url="/home", status_code=302)
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        max_age=604800,  # 7 days
+        httponly=True,
+        secure=False,
+        samesite="lax"
+    )
+    return response
 
 
-@router.get("/me", response_model=schemas.UserOut)
+@router.get("/logout", tags=["Authentication"])
+async def logout():
+    """
+    Logout the current user by clearing the authentication cookie.
+    Redirects to /login.
+    """
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=False,
+        samesite="lax"
+    )
+    return response
+
+
+@router.get("/me", response_model=schemas.UserOut, tags=["Users"])
 async def me(current: User = Depends(get_current_user)):
+    """
+    Get the current authenticated user's profile.
+    
+    Requires a valid JWT token in the Authorization header.
+    Returns the currently logged-in user's information.
+    """
     return current
 
 
-@router.patch("/me", response_model=schemas.UserOut)
+@router.patch("/me", response_model=schemas.UserOut, tags=["Users"])
 async def update_profile(update: schemas.ProfileUpdate, db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Update the current user's profile.
+    
+    Update bio and/or avatar URL. Only provided fields are updated.
+    
+    - **bio**: User biography (optional)
+    - **avatar_url**: URL to avatar image (optional)
+    """
     if update.bio is not None:
         current.bio = update.bio
     if update.avatar_url is not None:
@@ -54,8 +187,16 @@ async def update_profile(update: schemas.ProfileUpdate, db: AsyncSession = Depen
     return current
 
 
-@router.post("/connections", response_model=schemas.ConnectionOut)
+@router.post("/connections", response_model=schemas.ConnectionOut, tags=["Connections"])
 async def request_connection(payload: schemas.ConnectionCreate, db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Request a connection with another user.
+    
+    Initiates a friend request to another user.
+    The addressee must approve the connection before it becomes active.
+    
+    - **addressee_id**: ID of the user to connect with
+    """
     if str(current.id) == payload.addressee_id:
         raise HTTPException(status_code=400, detail="cannot connect to self")
     conn = Connection(requester_id=current.id, addressee_id=payload.addressee_id)
@@ -69,8 +210,16 @@ async def request_connection(payload: schemas.ConnectionCreate, db: AsyncSession
     return conn
 
 
-@router.post("/connections/{connection_id}/approve", response_model=schemas.ConnectionOut)
+@router.post("/connections/{connection_id}/approve", response_model=schemas.ConnectionOut, tags=["Connections"])
 async def approve_connection(connection_id: str, db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Approve a pending connection request.
+    
+    Accept a friend request from another user.
+    Only the addressee of the request can approve it.
+    
+    - **connection_id**: ID of the connection to approve
+    """
     conn = await db.get(Connection, connection_id)
     if not conn or str(conn.addressee_id) != str(current.id):
         raise HTTPException(status_code=404, detail="not found")
@@ -80,14 +229,31 @@ async def approve_connection(connection_id: str, db: AsyncSession = Depends(get_
     return conn
 
 
-@router.get("/connections", response_model=List[schemas.ConnectionOut])
+@router.get("/connections", response_model=List[schemas.ConnectionOut], tags=["Connections"])
 async def list_connections(db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    List all connections for the current user.
+    
+    Returns both sent and received connection requests.
+    Includes pending and accepted connections.
+    """
     result = await db.execute(select(Connection).where(or_(Connection.requester_id == current.id, Connection.addressee_id == current.id)))
     return result.scalars().all()
 
 
-@router.post("/chatrooms", response_model=schemas.ChatRoomOut)
+@router.post("/chatrooms", response_model=schemas.ChatRoomOut, tags=["Chat"])
 async def create_room(payload: schemas.ChatRoomCreate, db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Create a new chat room.
+    
+    Creates a group or direct message chat room.
+    All invited members must have accepted connections with the creator.
+    The creator is automatically added as a member.
+    
+    - **name**: Room name
+    - **member_ids**: List of user IDs to invite
+    - **is_group**: Whether this is a group chat (true) or direct message (false)
+    """
     # enforce friendship for each invited member
     for uid in payload.member_ids:
         res = await db.execute(select(Connection).where(and_(Connection.status == "accepted", or_(and_(Connection.requester_id == current.id, Connection.addressee_id == uid), and_(Connection.addressee_id == current.id, Connection.requester_id == uid)))))
@@ -104,14 +270,30 @@ async def create_room(payload: schemas.ChatRoomCreate, db: AsyncSession = Depend
     return room
 
 
-@router.get("/chatrooms", response_model=List[schemas.ChatRoomOut])
+@router.get("/chatrooms", response_model=List[schemas.ChatRoomOut], tags=["Chat"])
 async def my_rooms(db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Get all chat rooms the current user is a member of.
+    
+    Returns list of all group chats and direct messages for the current user.
+    """
     result = await db.execute(select(ChatRoom).join(ChatMember).where(ChatMember.user_id == current.id))
     return result.scalars().all()
 
 
-@router.post("/messages", response_model=schemas.MessageOut)
+@router.post("/messages", response_model=schemas.MessageOut, tags=["Chat"])
 async def send_message(payload: schemas.MessageCreate, db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Send a message to a chat room.
+    
+    Posts a message to a chat room. User must be a member of the room.
+    Message is broadcast to all connected WebSocket clients in the room.
+    
+    - **room_id**: ID of the chat room
+    - **body**: Message text (1-2000 characters)
+    - **attachment_url**: Optional URL to attached media
+    - **attachment_type**: Optional type of attachment (image, video, etc.)
+    """
     member = await db.execute(select(ChatMember).where(and_(ChatMember.room_id == payload.room_id, ChatMember.user_id == current.id)))
     if not member.scalars().first():
         raise HTTPException(status_code=403, detail="not in room")
@@ -138,8 +320,16 @@ async def send_message(payload: schemas.MessageCreate, db: AsyncSession = Depend
     return msg
 
 
-@router.get("/messages", response_model=List[schemas.MessageOut])
+@router.get("/messages", response_model=List[schemas.MessageOut], tags=["Chat"])
 async def inbox(room_id: str = Query(...), db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Get message history for a chat room.
+    
+    Retrieves the last 100 messages from a chat room.
+    User must be a member of the room to access messages.
+    
+    - **room_id**: ID of the chat room
+    """
     member = await db.execute(select(ChatMember).where(and_(ChatMember.room_id == room_id, ChatMember.user_id == current.id)))
     if not member.scalars().first():
         raise HTTPException(status_code=403, detail="not in room")
@@ -147,14 +337,26 @@ async def inbox(room_id: str = Query(...), db: AsyncSession = Depends(get_db), c
     return result.scalars().all()
 
 
-@router.get("/store", response_model=List[schemas.StoreItemOut])
+@router.get("/store", response_model=List[schemas.StoreItemOut], tags=["Store"])
 async def list_store(db: AsyncSession = Depends(get_db)):
+    """
+    List all available store items.
+    
+    Returns catalog of purchasable prefabs, decorations, and other items.
+    Public endpoint - no authentication required.
+    """
     result = await db.execute(select(StoreItem).where(StoreItem.active == True))
     return result.scalars().all()
 
 
-@router.post("/store/seed")
+@router.post("/store/seed", tags=["Store"])
 async def seed_store(db: AsyncSession = Depends(get_db)):
+    """
+    Initialize store with sample items.
+    
+    Populates the store with default prefabs and decorations.
+    Usually called once during setup. Idempotent - can be called multiple times.
+    """
     seeds = [
       StoreItem(sku="prefab-cyber", name="Cyber Spire", kind="prefab", price_cents=0, meta="{\"color\":\"#5af5ff\"}"),
       StoreItem(sku="prefab-castle", name="Neon Keep", kind="prefab", price_cents=0, meta="{\"color\":\"#ff4fa7\"}"),
@@ -166,8 +368,20 @@ async def seed_store(db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/paths/touch")
+@router.post("/paths/touch", tags=["Map"])
 async def touch_path(friend_id: str, q: schemas.VisibilityQuery, db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Create or refresh a supply path to a friend's location.
+    
+    Establishes a connection line between your home and a friend's home.
+    User must be physically near the friend's home (within 50m).
+    
+    - **friend_id**: ID of the friend
+    - **q**: Visibility query with current location
+    
+    Requires accepted connection with the friend.
+    Both users must have claimed home locations.
+    """
     # ensure friendship accepted
     conn = await db.execute(select(Connection).where(and_(Connection.status == "accepted", or_(and_(Connection.requester_id == current.id, Connection.addressee_id == friend_id), and_(Connection.addressee_id == current.id, Connection.requester_id == friend_id)))))
     if not conn.scalars().first():
@@ -199,8 +413,24 @@ async def touch_path(friend_id: str, q: schemas.VisibilityQuery, db: AsyncSessio
     return {"ok": True}
 
 
-@router.get("/visibility", response_model=schemas.VisibilityOut)
+@router.get("/visibility", response_model=schemas.VisibilityOut, tags=["Map"])
 async def visibility(q: schemas.VisibilityQuery = Depends(), db: AsyncSession = Depends(get_db), current: User = Depends(get_current_user)):
+    """
+    Get visible area based on FOG algorithm.
+    
+    Calculates what areas the user can see based on:
+    - Current location (base radius)
+    - User's home claim
+    - Accepted connections' home locations
+    - Active supply paths to friends
+    
+    Query parameters:
+    - **lat**: Current latitude
+    - **lon**: Current longitude
+    - **radius_m**: Detection radius in meters (default 50, max 200)
+    
+    Returns GeoJSON polygon of visible territory.
+    """
     # base point bubble
     pt = func.ST_GeogFromText(f"SRID=4326;POINT({q.lon} {q.lat})")
     base = func.ST_Buffer(pt, q.radius_m)
@@ -229,8 +459,34 @@ async def visibility(q: schemas.VisibilityQuery = Depends(), db: AsyncSession = 
     return schemas.VisibilityOut(visible_geojson=geojson, source_count=len(geometries))
 
 
-@router.websocket("/ws/chat/{room_id}")
+@router.websocket("/ws/chat/{room_id}", name="chat_websocket")
 async def chat_ws(websocket: WebSocket, room_id: str, token: str = Query(None), db: AsyncSession = Depends(get_db)):
+    """
+    WebSocket endpoint for real-time chat.
+    
+    Establishes a WebSocket connection for bidirectional chat communication.
+    
+    Connection parameters:
+    - **room_id**: Chat room ID (path parameter)
+    - **token**: JWT authentication token (query parameter)
+    
+    Message format (JSON):
+    {
+        "body": "message text",
+        "attachment_url": "optional URL",
+        "attachment_type": "optional type"
+    }
+    
+    Broadcast events:
+    {
+        "type": "message",
+        "room_id": "...",
+        "sender_id": "...",
+        "body": "...",
+        "id": "...",
+        "created_at": "ISO timestamp"
+    }
+    """
     if not token:
         await websocket.close(code=4401)
         return
@@ -272,7 +528,7 @@ async def chat_ws(websocket: WebSocket, room_id: str, token: str = Query(None), 
         return
 
 
-@router.get("/fog", response_model=schemas.FogOut)
+@router.get("/fog", response_model=schemas.FogOut, tags=["Map"])
 async def fog(
     q: schemas.VisibilityQuery = Depends(),
     min_lon: float | None = Query(None),
@@ -282,6 +538,20 @@ async def fog(
     db: AsyncSession = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
+    """
+    Get FOG (unexplored territory) based on visibility.
+    
+    Returns GeoJSON polygon of areas NOT visible to the user.
+    The inverse of the visibility endpoint.
+    
+    Query parameters:
+    - **lat**: Current latitude
+    - **lon**: Current longitude
+    - **radius_m**: Detection radius in meters (optional)
+    - **min_lon, min_lat, max_lon, max_lat**: Optional bounding box to limit area
+    
+    Returns GeoJSON polygon representing unexplored fog areas within bbox.
+    """
     pt = func.ST_GeogFromText(f"SRID=4326;POINT({q.lon} {q.lat})")
     my_home = (await db.execute(select(Claim.location).where(Claim.owner_id == current.id))).scalars().first()
     if not my_home:

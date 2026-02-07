@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Turf - Login{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h1>🌍 Turf</h1>
+        {% if request.query_params.get('error') %}
+        <div class="error show">
+            {% if request.query_params.get('error') == 'invalid_credentials' %}
+                Invalid email/handle or password
+            {% elif request.query_params.get('error') == 'invalid_token' %}
+                Invalid Google token
+            {% else %}
+                {{ request.query_params.get('error') }}
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label for="username">Email or Handle</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit">Sign In</button>
+        </form>
+        
+        <div class="divider">or</div>
+        
+        <div class="google-signin">
+            <div id="g_id_onload"
+                 data-client_id="CLIENT_ID_PLACEHOLDER"
+                 data-callback="handleCredentialResponse">
+            </div>
+            <div class="g_id_signin" data-type="standard"></div>
+        </div>
+        
+        <div class="link-group">
+            Don't have an account? <a href="/register">Sign up</a>
+        </div>
+    </div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+    function handleCredentialResponse(response) {
+        console.log('Google token received');
+        
+        // Create hidden form to submit Google token
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/auth/google';
+        
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'id_token';
+        input.value = response.credential;
+        
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+    }
+    
+    window.onload = function () {
+        google.accounts.id.initialize({client_id: 'CLIENT_ID_PLACEHOLDER'});
+    }
+</script>
+{% endblock %}
