@@ -1,40 +1,41 @@
 import { useEffect, useState } from 'react';
-import { fetchTopRooms } from '../lib/api';
 
 interface Props {
   roomId: string;
   onRoomChange: (roomId: string) => void;
 }
 
-interface TopRoom {
+interface PreviousRoom {
   room_id: string;
-  online_count: number;
+  accessed_at: number;
 }
 
 export default function RoomPanel({ roomId, onRoomChange }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [newRoomId, setNewRoomId] = useState(roomId);
   const [copiedText, setCopiedText] = useState('');
-  const [topRooms, setTopRooms] = useState<TopRoom[]>([]);
-  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
+  const [previousRooms, setPreviousRooms] = useState<PreviousRoom[]>([]);
 
+  // Load history from localStorage on mount
   useEffect(() => {
-    const loadTopRooms = async () => {
-      setIsLoadingRooms(true);
-      try {
-        const rooms = await fetchTopRooms(10);
-        setTopRooms(rooms);
-      } catch (err) {
-        console.error('Failed to load top rooms:', err);
-      } finally {
-        setIsLoadingRooms(false);
-      }
-    };
-
-    loadTopRooms();
-    const interval = setInterval(loadTopRooms, 5000); // Refresh every 5 seconds
-    return () => clearInterval(interval);
+    const stored = localStorage.getItem('previous-rooms');
+    const rooms = stored ? JSON.parse(stored) : [];
+    setPreviousRooms(rooms);
   }, []);
+
+  // Add current room to history when roomId changes
+  useEffect(() => {
+    if (roomId && roomId !== 'demo-room') {
+      const stored = localStorage.getItem('previous-rooms');
+      const rooms = stored ? JSON.parse(stored) : [];
+      const newRooms = [
+        { room_id: roomId, accessed_at: Date.now() },
+        ...rooms.filter((r: PreviousRoom) => r.room_id !== roomId),
+      ].slice(0, 20); // Keep only last 20 rooms
+      setPreviousRooms(newRooms);
+      localStorage.setItem('previous-rooms', JSON.stringify(newRooms));
+    }
+  }, [roomId]);
 
   const handleSave = () => {
     if (newRoomId.trim() && newRoomId !== roomId) {
@@ -75,12 +76,13 @@ export default function RoomPanel({ roomId, onRoomChange }: Props) {
       <div className="space-y-1">
         <label className="text-[10px] font-semibold text-slate-300 uppercase tracking-wider">Room ID</label>
         <div className="flex items-center gap-1">
-          <div className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center justify-between">
-            <code className="text-xs text-slate-200 truncate">{roomId}</code>
+          <div className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 flex items-center justify-between min-w-0" title={roomId}>
+            <code className="text-xs text-slate-200 truncate">{roomId.substring(0, 12)}...</code>
           </div>
           <button
             onClick={handleCopy}
-            className="px-2 py-1 bg-white/10 hover:bg-white/15 border border-white/20 rounded text-white text-xs transition"
+            className="px-2 py-1 bg-white/10 hover:bg-white/15 border border-white/20 rounded text-white text-xs transition flex-shrink-0"
+            title="Copy full ID"
           >
             {copiedText || '📋'}
           </button>
@@ -105,29 +107,23 @@ export default function RoomPanel({ roomId, onRoomChange }: Props) {
         </div>
       </div>
 
-      {/* Top Rooms Section */}
-      {topRooms.length > 0 && (
+      {/* Previous Rooms Section */}
+      {previousRooms.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-semibold text-slate-300 uppercase tracking-wider">Top Rooms</p>
+          <p className="text-[10px] font-semibold text-slate-300 uppercase tracking-wider">Previous Rooms</p>
           <div className="space-y-0.5 max-h-[140px] overflow-y-auto">
-            {topRooms.map((room) => (
+            {previousRooms.map((room) => (
               <button
                 key={room.room_id}
                 onClick={() => handleRoomClick(room.room_id)}
-                className={`w-full text-left rounded border px-2 py-1 transition text-[10px] flex items-center justify-between ${
+                className={`w-full text-left rounded border px-2 py-1 transition text-[10px] flex items-center gap-1 min-w-0 ${
                   room.room_id === roomId
                     ? 'border-neon bg-neon/10 text-white'
                     : 'border-white/15 text-slate-300 hover:border-white/30 hover:bg-white/5'
                 }`}
+                title={room.room_id}
               >
-                <span className="truncate font-medium">{room.room_id}</span>
-                <span className={`flex-shrink-0 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${
-                  room.room_id === roomId
-                    ? 'bg-neon/20 text-neon'
-                    : 'bg-slate-700 text-slate-200'
-                }`}>
-                  {room.online_count}
-                </span>
+                <span className="truncate font-medium flex-1">{room.room_id}</span>
               </button>
             ))}
           </div>

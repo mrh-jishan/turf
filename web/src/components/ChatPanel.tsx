@@ -229,9 +229,9 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
               ☰
             </button>
           )}
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <h3 className="text-xs font-semibold text-white">Chat</h3>
-            <p className="text-[10px] text-slate-400 truncate">{roomId}</p>
+            <p className="text-[10px] text-slate-400 truncate" title={roomId}>{roomId.substring(0, 12)}...</p>
           </div>
         </div>
         <div className="flex items-center gap-1">

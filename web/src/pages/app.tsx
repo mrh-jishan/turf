@@ -21,6 +21,7 @@ export default function AppPage() {
   const router = useRouter();
   const [lat, setLat] = useState(usaCenter[1]);
   const [lon, setLon] = useState(usaCenter[0]);
+  const [zoom, setZoom] = useState(14);
   const [claims, setClaims] = useState<ClaimFeature[]>([]);
   const [myClaims, setMyClaims] = useState<any[]>([]);
   const [edittingClaimId, setEditingClaimId] = useState<string | null>(null);
@@ -38,6 +39,7 @@ export default function AppPage() {
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isRoomSidebarOpen, setIsRoomSidebarOpen] = useState(false);
+  const [showNearbyClaims, setShowNearbyClaims] = useState(false);
   const wsBase = process.env.NEXT_PUBLIC_WS_BASE || 'ws://localhost:8000';
 
   const center = useMemo(() => [lon, lat] as [number, number], [lat, lon]);
@@ -222,7 +224,7 @@ export default function AppPage() {
         <section className={`${isMapExpanded ? 'w-full h-screen' : 'mt-3 gap-6 h-[calc(100vh-200px)] grid lg:grid-cols-[1.8fr_1.1fr_1.1fr] md:grid-cols-[2fr_1fr] sm:grid-cols-1 grid-cols-1'} transition-all duration-300`}>
           {/* Map - Left Column */}
           <div className={`relative min-h-[300px] transition-all duration-300 ${isMapExpanded ? 'w-full h-full' : 'sm:col-span-1 md:col-span-1 lg:col-span-1'}`}>
-            <Map center={center} claims={claims} fogGeojson={fogGeojson} visibleGeojson={visibleGeojson} isExpanded={isMapExpanded} onLocationSelect={(lat, lon) => { setLat(lat); setLon(lon); }} />
+            <Map center={center} zoom={zoom} claims={claims} fogGeojson={fogGeojson} visibleGeojson={visibleGeojson} isExpanded={isMapExpanded} onLocationSelect={(lat, lon) => { setLat(lat); setLon(lon); }} />
 
             <button
               onClick={() => setIsMapExpanded(!isMapExpanded)}
@@ -245,6 +247,7 @@ export default function AppPage() {
                           onClick={() => {
                             setLat(claim.lat);
                             setLon(claim.lon);
+                            setZoom(18);
                             setAddress(claim.address_label);
                             setMessage({ type: 'success', text: `Going to ${claim.address_label}` });
                             setTimeout(() => setMessage(null), 2000);
@@ -406,6 +409,7 @@ export default function AppPage() {
                               onClick={() => {
                                 setLat(claim.lat);
                                 setLon(claim.lon);
+                                setZoom(18);
                                 setAddress(claim.address_label);
                                 setMessage({ type: 'success', text: `Going to ${claim.address_label}` });
                                 setTimeout(() => setMessage(null), 2000);
@@ -477,6 +481,7 @@ export default function AppPage() {
                                 onClick={() => {
                                   setLat(claim.lat);
                                   setLon(claim.lon);
+                                  setZoom(18);
                                   setMessage({ type: 'success', text: `Going to ${claim.address_label}` });
                                   setTimeout(() => setMessage(null), 2000);
                                 }}
@@ -556,7 +561,7 @@ export default function AppPage() {
 
         {/* Chat Modal for Small Screens */}
         {isChatOpen && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm lg:hidden flex flex-col">
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm lg:hidden flex flex-col overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-white/10">
               <button
                 onClick={() => setIsRoomSidebarOpen(!isRoomSidebarOpen)}
@@ -606,15 +611,90 @@ export default function AppPage() {
           </div>
         )}
 
-        {/* Floating Chat Button for Small Screens */}
-        {roomId !== 'demo-room' && !isChatOpen && (
-          <button
-            onClick={() => setIsChatOpen(true)}
-            className="fixed bottom-4 right-4 z-40 lg:hidden p-3 bg-neon/90 hover:bg-neon text-black rounded-full shadow-lg font-bold text-lg transition"
-            title="Open chat"
-          >
-            💬
-          </button>
+        {/* Floating Action Buttons for Small Screens */}
+        {!isChatOpen && (
+          <div className="fixed bottom-4 right-4 z-40 lg:hidden flex flex-col gap-2">
+            {/* Nearby Claims Popup Button */}
+            {claims.length > 0 && (
+              <button
+                onClick={() => setShowNearbyClaims(!showNearbyClaims)}
+                className="p-3 bg-magenta/90 hover:bg-magenta text-white rounded-full shadow-lg font-bold text-lg transition relative"
+                title="Nearby claims"
+              >
+                📍
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-neon text-black text-xs rounded-full flex items-center justify-center font-bold">{claims.length}</span>
+              </button>
+            )}
+            {/* Chat Button */}
+            {roomId !== 'demo-room' && (
+              <button
+                onClick={() => setIsChatOpen(true)}
+                className="p-3 bg-neon/90 hover:bg-neon text-black rounded-full shadow-lg font-bold text-lg transition"
+                title="Open chat"
+              >
+                💬
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Nearby Claims Popup for Small Screens */}
+        {showNearbyClaims && !isChatOpen && claims.length > 0 && (
+          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden flex items-end">
+            <div className="w-full bg-gradient-to-b from-white/5 to-white/2 border-t border-white/10 rounded-t-2xl p-4 max-h-[60vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-neon">Nearby Claims ({claims.length})</h3>
+                <button
+                  onClick={() => setShowNearbyClaims(false)}
+                  className="p-1 hover:bg-white/10 rounded text-lg"
+                  title="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="space-y-2">
+                {claims.map((claim) => (
+                  <div key={claim.id} className="bg-white/5 border border-white/10 rounded p-2 text-xs">
+                    <p className="font-semibold text-slate-200 truncate">{claim.address_label}</p>
+                    <p className="text-slate-400 text-[10px]">{claim.lat.toFixed(4)}, {claim.lon.toFixed(4)}</p>
+                    <div className="flex gap-1 mt-1">
+                      <button
+                        onClick={() => {
+                          setLat(claim.lat);
+                          setLon(claim.lon);
+                          setZoom(18);
+                          setAddress(claim.address_label);
+                          setShowNearbyClaims(false);
+                          setMessage({ type: 'success', text: `Going to ${claim.address_label}` });
+                          setTimeout(() => setMessage(null), 2000);
+                        }}
+                        className="flex-1 px-2 py-1 bg-magenta/20 hover:bg-magenta/30 border border-magenta rounded text-magenta text-[9px] font-semibold transition"
+                        title="Go to location"
+                      >
+                        Go
+                      </button>
+                      {claim.owner_id && claim.owner_id !== currentUser?.id && (
+                        <button
+                          onClick={() => {
+                            const dmRoomId = [currentUser?.id, claim.owner_id].sort().join('_');
+                            setRoomId(dmRoomId);
+                            setShowNearbyClaims(false);
+                            setIsChatOpen(true);
+                            setMessage({ type: 'success', text: 'Opened chat' });
+                            setTimeout(() => setMessage(null), 2000);
+                          }}
+                          className="flex-1 px-2 py-1 bg-neon/20 hover:bg-neon/30 border border-neon rounded text-neon text-[9px] font-semibold transition"
+                          title="Chat with this user"
+                        >
+                          Chat
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </SiteLayout>

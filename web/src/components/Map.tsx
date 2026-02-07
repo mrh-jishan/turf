@@ -18,6 +18,7 @@ export interface ClaimFeature {
 
 interface Props {
   center: [number, number];
+  zoom?: number;
   claims?: ClaimFeature[];
   fogGeojson?: any;
   visibleGeojson?: any;
@@ -112,7 +113,7 @@ function makeThreeLayer(id: string, claims: ClaimFeature[]): mapboxgl.CustomLaye
   };
 }
 
-export default function Map({ center, claims = [], fogGeojson, visibleGeojson, onLocationSelect, isExpanded }: Props) {
+export default function Map({ center, zoom = 14, claims = [], fogGeojson, visibleGeojson, onLocationSelect, isExpanded }: Props) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -212,7 +213,7 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson, o
         return;
       }
       
-      map.easeTo({ center, duration: 800 });
+      map.easeTo({ center, zoom, duration: 800 });
     } catch (e) {
       console.error('Error animating to center:', e);
       // Fallback: set center without animation
@@ -224,7 +225,7 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson, o
         }
       }
     }
-  }, [center, loaded, styleLoaded]);
+  }, [center, zoom, loaded, styleLoaded]);
 
   useEffect(() => {
     if (!styleLoaded || !mapRef.current) return;
