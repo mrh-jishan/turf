@@ -19,9 +19,10 @@ interface Props {
   wsBase: string;
   currentUserId?: string;
   onlineCount?: number;
+  onToggleSidebar?: () => void;
 }
 
-export default function ChatPanel({ roomId, token, wsBase, currentUserId, onlineCount = 0 }: Props) {
+export default function ChatPanel({ roomId, token, wsBase, currentUserId, onlineCount = 0, onToggleSidebar }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [isConnected, setIsConnected] = useState(false);
@@ -218,7 +219,16 @@ export default function ChatPanel({ roomId, token, wsBase, currentUserId, online
     <div className="flex flex-col gap-2 bg-gradient-to-b from-white/5 to-white/2 backdrop-blur-sm border border-white/10 rounded-2xl p-3 h-full shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between pb-2 border-b border-white/10">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              className="p-1 hover:bg-white/10 rounded transition text-base flex-shrink-0 -ml-2"
+              title="Toggle rooms"
+            >
+              ☰
+            </button>
+          )}
           <div className="flex flex-col">
             <h3 className="text-xs font-semibold text-white">Chat</h3>
             <p className="text-[10px] text-slate-400 truncate">{roomId}</p>

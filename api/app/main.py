@@ -286,6 +286,8 @@ async def create_claim(
     Enforces single claim per ~20m grid.
     Users can have multiple claims.
     """
+    from geoalchemy2.functions import ST_Point
+    
     # enforce single claim per coordinate (approx 20m grid by rounding 5th decimal ~1.1m)
     pt_wkt = f"SRID=4326;POINT({payload.lon} {payload.lat})"
     existing = await session.execute(
@@ -297,14 +299,17 @@ async def create_claim(
     claim = Claim(
         owner_id=current_user.id,
         address_label=payload.address_label,
-        location=pt_wkt,
+        location=func.ST_GeogFromText(pt_wkt),
     )
     session.add(claim)
     try:
         await session.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await session.rollback()
-        raise HTTPException(status_code=400, detail="failed to create claim")
+        raise HTTPException(status_code=400, detail=f"failed to create claim: {str(e)}")
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=f"failed to create claim: {str(e)}")
     await session.refresh(claim)
     lon, lat = payload.lon, payload.lat
     return ClaimOut(
@@ -316,8 +321,9 @@ async def create_claim(
     )
 
 
-@app.get("/nearby", response_model=List[ClaimOut])
+@app.get("/nearby", response_model=List[dict])
 async def nearby(q: NearbyQuery = Depends(), session: AsyncSession = Depends(get_session)):
+    """Get all claims within a radius, including their builds."""
     pt_wkt = f"SRID=4326;POINT({q.lon} {q.lat})"
     result = await session.execute(
         select(Claim, func.ST_X(func.ST_AsText(Claim.location)), func.ST_Y(func.ST_AsText(Claim.location)))
@@ -327,15 +333,32 @@ async def nearby(q: NearbyQuery = Depends(), session: AsyncSession = Depends(get
     rows = result.all()
     claims = []
     for claim, lon, lat in rows:
-        claims.append(
-            ClaimOut(
-                id=str(claim.id),
-                owner_id=str(claim.owner_id),
-                address_label=claim.address_label,
-                lat=float(lat),
-                lon=float(lon),
-            )
+        # Fetch builds for this claim
+        builds_result = await session.execute(
+            select(Build).where(Build.claim_id == claim.id)
         )
+        builds = builds_result.scalars().all()
+        
+        # Use first build's prefab/flag/height, or defaults
+        prefab = 'cyber'
+        flag = 'usa'
+        height_m = 12
+        if builds:
+            first_build = builds[0]
+            prefab = first_build.prefab
+            flag = first_build.flag or 'usa'
+            height_m = first_build.height_m
+        
+        claims.append({
+            "id": str(claim.id),
+            "owner_id": str(claim.owner_id),
+            "address_label": claim.address_label,
+            "lat": float(lat),
+            "lon": float(lon),
+            "prefab": prefab,
+            "flag": flag,
+            "height_m": height_m,
+        })
     return claims
 
 

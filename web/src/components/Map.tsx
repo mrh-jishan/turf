@@ -22,6 +22,7 @@ interface Props {
   fogGeojson?: any;
   visibleGeojson?: any;
   onLocationSelect?: (lat: number, lon: number) => void;
+  isExpanded?: boolean;
 }
 
 function buildGeoJSON(claims: ClaimFeature[]) {
@@ -111,7 +112,7 @@ function makeThreeLayer(id: string, claims: ClaimFeature[]): mapboxgl.CustomLaye
   };
 }
 
-export default function Map({ center, claims = [], fogGeojson, visibleGeojson, onLocationSelect }: Props) {
+export default function Map({ center, claims = [], fogGeojson, visibleGeojson, onLocationSelect, isExpanded }: Props) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -136,7 +137,8 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson, o
       pitch: 55,
       bearing: -10,
       hash: false,
-      cooperativeGestures: true,
+      cooperativeGestures: false,
+      attributionControl: false,
       antialias: true,
       preserveDrawingBuffer: true,
     });
@@ -174,25 +176,51 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson, o
   }, []);
 
   useEffect(() => {
-    if (loaded && styleLoaded && mapRef.current) {
-      try {
-        // Ensure the map has a valid canvas and is fully rendered
-        const map = mapRef.current;
-        if (!map.getCanvas() || !map.getCenter) {
-          console.warn('Map canvas not ready');
-          return;
-        }
-        
-        map.easeTo({ center, duration: 800 });
-      } catch (e) {
-        console.error('Error animating to center:', e);
-        // Fallback: set center without animation
-        if (mapRef.current?.setCenter) {
-          try {
-            mapRef.current.setCenter(center);
-          } catch (err) {
-            console.error('Error setting center:', err);
-          }
+    if (!containerRef.current || !mapRef.current) return;
+
+    // Use ResizeObserver to detect when the container resizes (e.g., when map expands)
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.resize();
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    // Trigger map resize when expand/collapse happens
+    const timeoutId = setTimeout(() => {
+      if (mapRef.current) {
+        mapRef.current.resize();
+      }
+    }, 300); // Match the transition duration
+    return () => clearTimeout(timeoutId);
+  }, [isExpanded]);
+
+  useEffect(() => {
+    if (!containerRef.current || !mapRef.current) return;
+    try {
+      // Ensure the map has a valid canvas and is fully rendered
+      const map = mapRef.current;
+      if (!map.getCanvas() || !map.getCenter) {
+        console.warn('Map canvas not ready');
+        return;
+      }
+      
+      map.easeTo({ center, duration: 800 });
+    } catch (e) {
+      console.error('Error animating to center:', e);
+      // Fallback: set center without animation
+      if (mapRef.current?.setCenter) {
+        try {
+          mapRef.current.setCenter(center);
+        } catch (err) {
+          console.error('Error setting center:', err);
         }
       }
     }
@@ -369,7 +397,7 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson, o
   }, [claims, styleLoaded, fogGeojson, visibleGeojson]);
 
   return (
-    <div className="relative w-full h-full rounded-3xl overflow-hidden shadow-glow group">
+    <div className={`relative w-full h-full ${isExpanded ? '' : 'rounded-3xl overflow-hidden shadow-glow'} group`}>
       {!mapboxgl.accessToken && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 text-center px-6 text-sm">
           Set NEXT_PUBLIC_MAPBOX_TOKEN to view the map.
@@ -378,7 +406,7 @@ export default function Map({ center, claims = [], fogGeojson, visibleGeojson, o
       <div ref={containerRef} className="w-full h-full cursor-crosshair" />
       
       {/* Zoom Controls */}
-      <div className="absolute top-4 right-4 z-30 flex flex-col gap-2">
+      <div className={`absolute z-30 flex flex-col gap-2 ${isExpanded ? 'top-20 right-4' : 'top-4 right-4'}`}>
         <button
           onClick={() => handleZoom('in')}
           className="bg-white/10 hover:bg-white/20 border border-white/30 hover:border-neon text-white rounded-lg p-2 transition flex items-center justify-center w-10 h-10 font-bold text-lg"

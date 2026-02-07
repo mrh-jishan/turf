@@ -13,12 +13,13 @@ interface SiteLayoutProps {
   children: ReactNode;
   currentUser?: { id: string; handle: string; email?: string } | null;
   onLogout?: () => void;
+  isMapExpanded?: boolean;
 }
 
-export default function SiteLayout({ children, currentUser, onLogout }: SiteLayoutProps) {
+export default function SiteLayout({ children, currentUser, onLogout, isMapExpanded }: SiteLayoutProps) {
   return (
     <div className="min-h-screen bg-[#050914] text-white">
-      <header className="sticky top-0 z-20 backdrop-blur-md bg-black/40 border-b border-white/10">
+      <header className={`sticky top-0 z-20 backdrop-blur-md bg-black/40 border-b border-white/10 transition-all duration-300 ${isMapExpanded ? 'opacity-0 invisible h-0 overflow-hidden' : 'opacity-100 visible'}`}>
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link href="/" className="text-lg font-semibold tracking-tight">
             Turf
@@ -55,8 +56,8 @@ export default function SiteLayout({ children, currentUser, onLogout }: SiteLayo
           </nav>
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-4">{children}</main>
-      <footer className="border-t border-white/10 text-sm text-slate-400 py-6 mt-10">
+      <main className={`transition-all duration-300 ${isMapExpanded ? 'p-0 w-screen h-screen' : 'max-w-6xl mx-auto px-4'}`}>{children}</main>
+      <footer className={`border-t border-white/10 text-sm text-slate-400 py-6 mt-10 transition-all duration-300 ${isMapExpanded ? 'opacity-0 invisible h-0 overflow-hidden' : 'opacity-100 visible'}`}>
         <div className="max-w-6xl mx-auto px-4 flex justify-between">
           <span>© {new Date().getFullYear()} Turf. All rights reserved.</span>
           <div className="flex gap-4">
