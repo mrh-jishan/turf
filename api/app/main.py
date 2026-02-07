@@ -40,6 +40,21 @@ def custom_openapi():
         routes=app.routes,
         openapi_version="3.0.3",  # Force 3.0.3 for Swagger UI v3 compatibility
     )
+    
+    # Add security schemes for Bearer token authentication
+    openapi_schema["components"] = openapi_schema.get("components", {})
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearer": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your JWT token from /api/login"
+        }
+    }
+    
+    # Add security requirement to all endpoints (except auth endpoints)
+    openapi_schema["security"] = [{"bearer": []}]
+    
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
@@ -131,7 +146,7 @@ async def docs_redirect(current_user: Optional[User] = Depends(get_current_user_
         <script src="https://unpkg.com/swagger-ui-dist@3/swagger-ui-bundle.js"></script>
         <script>
             window.onload = function() {
-                SwaggerUIBundle({
+                const ui = SwaggerUIBundle({
                     url: "/openapi.json",
                     dom_id: '#swagger-ui',
                     deepLinking: true,
@@ -142,8 +157,25 @@ async def docs_redirect(current_user: Optional[User] = Depends(get_current_user_
                     plugins: [
                         SwaggerUIBundle.plugins.DownloadUrl
                     ],
-                    layout: "BaseLayout"
+                    layout: "BaseLayout",
+                    requestInterceptor: (request) => {
+                        // Ensure cookies are sent with requests for SSR auth
+                        request.credentials = 'include';
+                        return request;
+                    },
+                    onComplete: function() {
+                        // Restore token from localStorage if exists
+                        const savedToken = localStorage.getItem('swagger_ui_token');
+                        if (savedToken) {
+                            ui.preauthorizeApiKey('bearer', savedToken);
+                        }
+                    }
                 })
+                
+                // Store token when user authorizes via Swagger UI
+                window.onAuthorize = function(token) {
+                    localStorage.setItem('swagger_ui_token', token);
+                }
             }
         </script>
     </body>

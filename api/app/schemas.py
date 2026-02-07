@@ -31,6 +31,16 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(..., description="Email or handle")
+    password: str = Field(..., min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
 class ProfileUpdate(BaseModel):
     bio: Optional[str] = None
     avatar_url: Optional[str] = None

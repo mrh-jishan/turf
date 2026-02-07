@@ -70,23 +70,28 @@ export async function fetchFog(token: string, lat: number, lon: number, radius_m
 }
 
 export async function register(handle: string, email: string, password: string) {
-  const res = await fetch(`${API_BASE}/register`, {
+  const res = await fetch(`${API_BASE}/api/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ handle, email, password }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Registration failed');
+  }
   return res.json();
 }
 
 export async function login(username: string, password: string) {
-  const body = new URLSearchParams({ username, password });
-  const res = await fetch(`${API_BASE}/login`, {
+  const res = await fetch(`${API_BASE}/api/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Login failed');
+  }
   return res.json();
 }
 

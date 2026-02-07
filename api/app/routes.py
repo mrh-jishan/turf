@@ -141,6 +141,52 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     return response
 
 
+@router.post("/api/login", response_model=schemas.TokenResponse, tags=["Authentication"])
+async def api_login(login_data: schemas.LoginRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Authenticate with email/password and get JWT token (JSON API).
+    
+    Returns a JSON response with access_token for frontend applications.
+    Can use email or handle as username.
+    """
+    result = await db.execute(select(User).where(or_(User.email == login_data.username, User.handle == login_data.username)))
+    user = result.scalars().first()
+    if not user or not verify_password(login_data.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    
+    token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(days=7))
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/api/register", response_model=schemas.UserOut, tags=["Authentication"])
+async def api_register(user_data: schemas.UserCreate, db: AsyncSession = Depends(get_db)):
+    """
+    Register a new user account (JSON API).
+    
+    Returns the created user object. Frontend should then call /api/login to get a token.
+    
+    - **handle**: Unique username (3-30 characters)
+    - **email**: Valid email address
+    - **password**: Minimum 6 characters
+    """
+    if len(user_data.password) < 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 6 characters")
+    
+    if len(user_data.handle) < 3 or len(user_data.handle) > 30:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Handle must be 3-30 characters")
+    
+    user = User(handle=user_data.handle, email=user_data.email, password_hash=get_password_hash(user_data.password))
+    db.add(user)
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Handle or email already taken")
+    
+    return user
+
+
 @router.get("/logout", tags=["Authentication"])
 async def logout():
     """
